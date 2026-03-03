@@ -1,0 +1,6 @@
+from fastapi import FastAPI
+
+from rhythm_jump.api.http import router as api_router
+
+app = FastAPI(title='Rhythm Jump Backend')
+app.include_router(api_router, prefix='/api')
