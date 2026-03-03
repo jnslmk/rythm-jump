@@ -9,10 +9,12 @@ from rhythm_jump.engine.session import GameSession, Mode
 router = APIRouter()
 MAX_SESSIONS = 100
 _sessions: dict[str, GameSession] = {}
+_session_connection_counts: dict[str, int] = {}
 
 
 def __test_reset_sessions() -> None:
     _sessions.clear()
+    _session_connection_counts.clear()
 
 
 def _get_or_create_session(session_id: str) -> GameSession:
@@ -34,6 +36,9 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
     session = _get_or_create_session(session_id)
 
     await websocket.accept()
+    _session_connection_counts[session_id] = (
+        _session_connection_counts.get(session_id, 0) + 1
+    )
     session.start()
     await websocket.send_json(
         {'type': 'session_state', 'session_id': session_id, 'state': session.state}
@@ -75,8 +80,16 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
             else:
                 await websocket.send_json({'type': 'error', 'reason': 'unknown_type'})
     except WebSocketDisconnect:
-        session.on_browser_disconnected()
+        pass
     finally:
+        current_count = _session_connection_counts.get(session_id, 0)
+        next_count = current_count - 1
+        if next_count <= 0:
+            _session_connection_counts.pop(session_id, None)
+            session.on_browser_disconnected()
+        else:
+            _session_connection_counts[session_id] = next_count
+
         clock_task.cancel()
         with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
             await clock_task

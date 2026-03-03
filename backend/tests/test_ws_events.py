@@ -123,3 +123,30 @@ def test_ws_session_store_evicts_oldest_when_cap_exceeded() -> None:
                 'session_id': 'evict-a',
                 'state': 'playing',
             }
+
+
+def test_ws_disconnect_only_aborts_when_last_connection_closes() -> None:
+    with TestClient(app) as client:
+        with (
+            client.websocket_connect('/ws/session/shared-session') as ws_a,
+            client.websocket_connect('/ws/session/shared-session') as ws_b,
+        ):
+            _receive_event(ws_a, 'session_state')
+            _receive_event(ws_b, 'session_state')
+
+            ws_a.close()
+            with client.websocket_connect('/ws/session/shared-session') as websocket:
+                session_state = _receive_event(websocket, 'session_state')
+                assert session_state == {
+                    'type': 'session_state',
+                    'session_id': 'shared-session',
+                    'state': 'playing',
+                }
+
+        with client.websocket_connect('/ws/session/shared-session') as websocket:
+            session_state = _receive_event(websocket, 'session_state')
+            assert session_state == {
+                'type': 'session_state',
+                'session_id': 'shared-session',
+                'state': 'aborted_disconnected',
+            }
