@@ -5,6 +5,13 @@ Side = Literal['left', 'right']
 
 
 def project_bar(strip_len: int, progress: float, side: Side) -> int:
+    if side not in ('left', 'right'):
+        raise ValueError("side must be 'left' or 'right'")
+    if strip_len < 2:
+        raise ValueError('strip_len must be >= 2')
+    if strip_len % 2 != 0:
+        raise ValueError('strip_len must be even')
+
     half = strip_len // 2
     clipped_progress = min(max(progress, 0.0), 1.0)
 
