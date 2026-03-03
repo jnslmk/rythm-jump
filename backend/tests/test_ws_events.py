@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
 from rhythm_jump.api import ws as ws_module
+from rhythm_jump.engine.session import State
 from rhythm_jump.main import app
 
 
@@ -194,3 +195,21 @@ def test_ws_all_active_at_cap_returns_session_capacity_error() -> None:
 
             assert len(ws_module._sessions) == 1
             assert 'cap-a' in ws_module._sessions
+
+
+def test_ws_cleanup_when_start_raises_before_clock_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_start(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError('start failed')
+
+    monkeypatch.setattr(ws_module.GameSession, 'start', _raise_start)
+
+    with TestClient(app) as client:
+        with pytest.raises(RuntimeError, match='start failed'):
+            with client.websocket_connect('/ws/session/start-failure-session'):
+                pass
+
+    assert ws_module._session_connection_counts.get('start-failure-session', 0) == 0
+    assert 'start-failure-session' not in ws_module._session_connection_counts
+    assert ws_module._sessions['start-failure-session'].state == State.IDLE
