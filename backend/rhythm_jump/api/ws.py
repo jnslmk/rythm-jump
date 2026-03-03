@@ -51,26 +51,28 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
         await websocket.close()
         return
 
+    clock_task: asyncio.Task[None] | None = None
     _session_connection_counts[session_id] = (
         _session_connection_counts.get(session_id, 0) + 1
     )
-    session.start()
-    await websocket.send_json(
-        {'type': 'session_state', 'session_id': session_id, 'state': session.state}
-    )
-
-    async def send_clock_ticks() -> None:
-        tick = 0
-        while True:
-            await asyncio.sleep(0.1)
-            await websocket.send_json(
-                {'type': 'clock_tick', 'session_id': session_id, 'tick': tick}
-            )
-            tick += 1
-
-    clock_task = asyncio.create_task(send_clock_ticks())
 
     try:
+        session.start()
+        await websocket.send_json(
+            {'type': 'session_state', 'session_id': session_id, 'state': session.state}
+        )
+
+        async def send_clock_ticks() -> None:
+            tick = 0
+            while True:
+                await asyncio.sleep(0.1)
+                await websocket.send_json(
+                    {'type': 'clock_tick', 'session_id': session_id, 'tick': tick}
+                )
+                tick += 1
+
+        clock_task = asyncio.create_task(send_clock_ticks())
+
         while True:
             raw_message = await websocket.receive_text()
             try:
@@ -105,6 +107,7 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
         else:
             _session_connection_counts[session_id] = next_count
 
-        clock_task.cancel()
-        with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
-            await clock_task
+        if clock_task is not None:
+            clock_task.cancel()
+            with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
+                await clock_task
