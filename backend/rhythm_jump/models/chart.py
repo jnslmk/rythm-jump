@@ -1,18 +1,19 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, NonNegativeInt, model_validator
 
 
 class JudgementWindowsMs(BaseModel):
-    perfect: int
-    good: int
+    perfect: NonNegativeInt
+    good: NonNegativeInt
 
 
 class Chart(BaseModel):
     song_id: str
-    travel_time_ms: int
+    travel_time_ms: NonNegativeInt
+    # Signed to allow calibration shifts where charts need early/late global timing offsets.
     global_offset_ms: int
     judgement_windows_ms: JudgementWindowsMs
-    left: list[int]
-    right: list[int]
+    left: list[NonNegativeInt]
+    right: list[NonNegativeInt]
 
     @model_validator(mode='after')
     def validate_lanes_not_both_empty(self) -> 'Chart':
