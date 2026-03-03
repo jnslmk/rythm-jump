@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 router = APIRouter()
@@ -12,16 +14,20 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
 
     try:
         while True:
-            message = await websocket.receive_json()
+            raw_message = await websocket.receive_text()
+            try:
+                message = json.loads(raw_message)
+            except json.JSONDecodeError:
+                await websocket.send_json({'type': 'error', 'reason': 'invalid_json'})
+                continue
+
+            if not isinstance(message, dict):
+                await websocket.send_json({'type': 'error', 'reason': 'invalid_payload'})
+                continue
+
             if message.get('type') == 'ping':
                 await websocket.send_json({'type': 'pong', 'session_id': session_id})
             else:
-                await websocket.send_json(
-                    {
-                        'type': 'session_state',
-                        'session_id': session_id,
-                        'state': 'idle',
-                    }
-                )
+                await websocket.send_json({'type': 'error', 'reason': 'unknown_type'})
     except WebSocketDisconnect:
         return
