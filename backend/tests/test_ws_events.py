@@ -166,6 +166,9 @@ def test_ws_eviction_does_not_remove_active_session() -> None:
                 _receive_event(ws_c, 'session_state')
 
             assert 'active-a' in ws_module._sessions
+            assert 'inactive-b' not in ws_module._sessions
+            assert 'inactive-c' in ws_module._sessions
+            assert len(ws_module._sessions) == ws_module.MAX_SESSIONS
 
         with client.websocket_connect('/ws/session/active-a') as websocket:
             session_state = _receive_event(websocket, 'session_state')
@@ -174,3 +177,20 @@ def test_ws_eviction_does_not_remove_active_session() -> None:
                 'session_id': 'active-a',
                 'state': 'aborted_disconnected',
             }
+
+
+def test_ws_all_active_at_cap_returns_session_capacity_error() -> None:
+    ws_module.MAX_SESSIONS = 1
+
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws/session/cap-a') as ws_a:
+            _receive_event(ws_a, 'session_state')
+
+            with client.websocket_connect('/ws/session/cap-b') as ws_b:
+                assert ws_b.receive_json() == {
+                    'type': 'error',
+                    'reason': 'session_capacity',
+                }
+
+            assert len(ws_module._sessions) == 1
+            assert 'cap-a' in ws_module._sessions

@@ -12,6 +12,10 @@ _sessions: dict[str, GameSession] = {}
 _session_connection_counts: dict[str, int] = {}
 
 
+class SessionCapacityError(Exception):
+    pass
+
+
 def __test_reset_sessions() -> None:
     _sessions.clear()
     _session_connection_counts.clear()
@@ -28,8 +32,9 @@ def _get_or_create_session(session_id: str) -> GameSession:
             if _session_connection_counts.get(candidate_session_id, 0) == 0:
                 eviction_target = candidate_session_id
                 break
-        if eviction_target is not None:
-            _sessions.pop(eviction_target)
+        if eviction_target is None:
+            raise SessionCapacityError
+        _sessions.pop(eviction_target)
 
     new_session = GameSession(mode=Mode.BROWSER_ATTACHED)
     _sessions[session_id] = new_session
@@ -38,9 +43,14 @@ def _get_or_create_session(session_id: str) -> GameSession:
 
 @router.websocket('/ws/session/{session_id}')
 async def session_stream(websocket: WebSocket, session_id: str) -> None:
-    session = _get_or_create_session(session_id)
-
     await websocket.accept()
+    try:
+        session = _get_or_create_session(session_id)
+    except SessionCapacityError:
+        await websocket.send_json({'type': 'error', 'reason': 'session_capacity'})
+        await websocket.close()
+        return
+
     _session_connection_counts[session_id] = (
         _session_connection_counts.get(session_id, 0) + 1
     )
