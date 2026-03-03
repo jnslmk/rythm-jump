@@ -1,0 +1,19 @@
+from rhythm_jump.engine.led_frames import project_bar
+
+
+def test_left_progress_full_maps_to_start_of_strip() -> None:
+    assert project_bar(strip_len=120, progress=1.0, side='left') == 0
+
+
+def test_right_progress_full_maps_to_end_of_strip() -> None:
+    assert project_bar(strip_len=120, progress=1.0, side='right') == 119
+
+
+def test_progress_zero_maps_to_center_adjacent_origins() -> None:
+    assert project_bar(strip_len=120, progress=0.0, side='left') == 59
+    assert project_bar(strip_len=120, progress=0.0, side='right') == 60
+
+
+def test_progress_is_clipped_to_range_zero_to_one() -> None:
+    assert project_bar(strip_len=120, progress=-1.0, side='left') == 59
+    assert project_bar(strip_len=120, progress=2.0, side='right') == 119
