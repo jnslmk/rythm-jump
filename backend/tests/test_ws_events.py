@@ -150,3 +150,27 @@ def test_ws_disconnect_only_aborts_when_last_connection_closes() -> None:
                 'session_id': 'shared-session',
                 'state': 'aborted_disconnected',
             }
+
+
+def test_ws_eviction_does_not_remove_active_session() -> None:
+    ws_module.MAX_SESSIONS = 2
+
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws/session/active-a') as ws_a:
+            _receive_event(ws_a, 'session_state')
+
+            with client.websocket_connect('/ws/session/inactive-b') as ws_b:
+                _receive_event(ws_b, 'session_state')
+
+            with client.websocket_connect('/ws/session/inactive-c') as ws_c:
+                _receive_event(ws_c, 'session_state')
+
+            assert 'active-a' in ws_module._sessions
+
+        with client.websocket_connect('/ws/session/active-a') as websocket:
+            session_state = _receive_event(websocket, 'session_state')
+            assert session_state == {
+                'type': 'session_state',
+                'session_id': 'active-a',
+                'state': 'aborted_disconnected',
+            }

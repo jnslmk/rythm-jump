@@ -23,8 +23,13 @@ def _get_or_create_session(session_id: str) -> GameSession:
         return existing_session
 
     if len(_sessions) >= MAX_SESSIONS:
-        oldest_session_id = next(iter(_sessions))
-        _sessions.pop(oldest_session_id)
+        eviction_target: str | None = None
+        for candidate_session_id in _sessions:
+            if _session_connection_counts.get(candidate_session_id, 0) == 0:
+                eviction_target = candidate_session_id
+                break
+        if eviction_target is not None:
+            _sessions.pop(eviction_target)
 
     new_session = GameSession(mode=Mode.BROWSER_ATTACHED)
     _sessions[session_id] = new_session
