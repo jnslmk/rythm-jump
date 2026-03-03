@@ -35,3 +35,19 @@ def test_strip_len_less_than_two_raises_value_error(strip_len: int) -> None:
 def test_odd_strip_len_raises_value_error() -> None:
     with pytest.raises(ValueError):
         project_bar(strip_len=119, progress=0.5, side='right')
+
+
+def test_nan_progress_raises_value_error() -> None:
+    with pytest.raises(ValueError):
+        project_bar(strip_len=120, progress=float('nan'), side='left')
+
+
+@pytest.mark.parametrize('progress', [float('inf'), float('-inf')])
+def test_infinite_progress_raises_value_error(progress: float) -> None:
+    with pytest.raises(ValueError):
+        project_bar(strip_len=120, progress=progress, side='right')
+
+
+def test_non_int_strip_len_raises_type_error() -> None:
+    with pytest.raises(TypeError):
+        project_bar(strip_len=120.0, progress=0.5, side='left')  # type: ignore[arg-type]
