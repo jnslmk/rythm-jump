@@ -67,3 +67,48 @@ def test_load_chart_rejects_negative_timings(
 
     with pytest.raises(ValidationError):
         load_chart(_write_chart(tmp_path, payload))
+
+
+def test_load_chart_rejects_zero_travel_time(tmp_path: Path) -> None:
+    payload = _base_chart_payload()
+    payload['travel_time_ms'] = 0
+
+    with pytest.raises(ValidationError):
+        load_chart(_write_chart(tmp_path, payload))
+
+
+@pytest.mark.parametrize(
+    'windows',
+    [
+        {'perfect': 0, 'good': 100},
+        {'perfect': 50, 'good': 0},
+        {'perfect': -1, 'good': 100},
+        {'perfect': 50, 'good': -1},
+    ],
+)
+def test_load_chart_rejects_zero_or_negative_judgement_windows(
+    tmp_path: Path,
+    windows: dict[str, int],
+) -> None:
+    payload = _base_chart_payload()
+    payload['judgement_windows_ms'] = windows
+
+    with pytest.raises(ValidationError):
+        load_chart(_write_chart(tmp_path, payload))
+
+
+def test_load_chart_rejects_good_window_less_than_perfect(tmp_path: Path) -> None:
+    payload = _base_chart_payload()
+    payload['judgement_windows_ms'] = {'perfect': 60, 'good': 50}
+
+    with pytest.raises(ValidationError):
+        load_chart(_write_chart(tmp_path, payload))
+
+
+def test_load_chart_accepts_negative_global_offset(tmp_path: Path) -> None:
+    payload = _base_chart_payload()
+    payload['global_offset_ms'] = -120
+
+    chart = load_chart(_write_chart(tmp_path, payload))
+
+    assert chart.global_offset_ms == -120

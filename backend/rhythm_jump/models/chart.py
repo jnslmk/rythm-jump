@@ -1,14 +1,20 @@
-from pydantic import BaseModel, NonNegativeInt, model_validator
+from pydantic import BaseModel, NonNegativeInt, PositiveInt, model_validator
 
 
 class JudgementWindowsMs(BaseModel):
-    perfect: NonNegativeInt
-    good: NonNegativeInt
+    perfect: PositiveInt
+    good: PositiveInt
+
+    @model_validator(mode='after')
+    def validate_good_not_less_than_perfect(self) -> 'JudgementWindowsMs':
+        if self.good < self.perfect:
+            raise ValueError('good judgement window must be >= perfect window')
+        return self
 
 
 class Chart(BaseModel):
     song_id: str
-    travel_time_ms: NonNegativeInt
+    travel_time_ms: PositiveInt
     # Signed to allow calibration shifts where charts need early/late global timing offsets.
     global_offset_ms: int
     judgement_windows_ms: JudgementWindowsMs
