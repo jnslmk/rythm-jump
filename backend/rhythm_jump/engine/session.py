@@ -6,16 +6,23 @@ class Mode(StrEnum):
     HEADLESS = 'headless'
 
 
+class State(StrEnum):
+    IDLE = 'idle'
+    PLAYING = 'playing'
+    ABORTED_DISCONNECTED = 'aborted_disconnected'
+
+
 class GameSession:
     def __init__(self, mode: Mode) -> None:
         self.mode = mode
-        self.state = 'idle'
+        self.state = State.IDLE
 
     def start(self) -> None:
-        self.state = 'playing'
+        if self.state == State.IDLE:
+            self.state = State.PLAYING
 
     def on_browser_disconnected(self) -> None:
-        if self.state != 'playing':
+        if self.state != State.PLAYING:
             return
         if self.mode == Mode.BROWSER_ATTACHED:
-            self.state = 'aborted_disconnected'
+            self.state = State.ABORTED_DISCONNECTED
