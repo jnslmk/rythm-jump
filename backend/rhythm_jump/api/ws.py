@@ -7,12 +7,31 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from rhythm_jump.engine.session import GameSession, Mode
 
 router = APIRouter()
+MAX_SESSIONS = 100
 _sessions: dict[str, GameSession] = {}
+
+
+def __test_reset_sessions() -> None:
+    _sessions.clear()
+
+
+def _get_or_create_session(session_id: str) -> GameSession:
+    existing_session = _sessions.get(session_id)
+    if existing_session is not None:
+        return existing_session
+
+    if len(_sessions) >= MAX_SESSIONS:
+        oldest_session_id = next(iter(_sessions))
+        _sessions.pop(oldest_session_id)
+
+    new_session = GameSession(mode=Mode.BROWSER_ATTACHED)
+    _sessions[session_id] = new_session
+    return new_session
 
 
 @router.websocket('/ws/session/{session_id}')
 async def session_stream(websocket: WebSocket, session_id: str) -> None:
-    session = _sessions.setdefault(session_id, GameSession(mode=Mode.BROWSER_ATTACHED))
+    session = _get_or_create_session(session_id)
     session.start()
 
     await websocket.accept()
