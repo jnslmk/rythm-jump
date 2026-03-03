@@ -24,7 +24,11 @@ def test_ws_session_stream_emits_required_events() -> None:
     with TestClient(app) as client:
         with client.websocket_connect('/ws/session/stream-session') as websocket:
             session_state = _receive_event(websocket, 'session_state')
-            assert session_state['session_id'] == 'stream-session'
+            assert session_state == {
+                'type': 'session_state',
+                'session_id': 'stream-session',
+                'state': 'playing',
+            }
             _receive_event(websocket, 'clock_tick')
             websocket.send_json({'type': 'ping'})
             assert _receive_event(websocket, 'pong') == {

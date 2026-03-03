@@ -32,9 +32,9 @@ def _get_or_create_session(session_id: str) -> GameSession:
 @router.websocket('/ws/session/{session_id}')
 async def session_stream(websocket: WebSocket, session_id: str) -> None:
     session = _get_or_create_session(session_id)
-    session.start()
 
     await websocket.accept()
+    session.start()
     await websocket.send_json(
         {'type': 'session_state', 'session_id': session_id, 'state': session.state}
     )
@@ -78,5 +78,5 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
         session.on_browser_disconnected()
     finally:
         clock_task.cancel()
-        with suppress(asyncio.CancelledError):
+        with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
             await clock_task
