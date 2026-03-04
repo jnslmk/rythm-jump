@@ -35,13 +35,9 @@ function reduceStreamLevels(levels, event) {
     const isRight = event.lane === 'right';
     
     if (isLeft) {
-      document.getElementById('box-left').classList.add('active');
-      setTimeout(() => document.getElementById('box-left').classList.remove('active'), 100);
       return [1, levels[1]];
     }
     if (isRight) {
-      document.getElementById('box-right').classList.add('active');
-      setTimeout(() => document.getElementById('box-right').classList.remove('active'), 100);
       return [levels[0], 1];
     }
   }
@@ -57,6 +53,8 @@ function renderVisualizer() {
   const canvas = document.getElementById('visualizer');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
   const width = canvas.width;
   const height = canvas.height;
 
@@ -67,9 +65,9 @@ function renderVisualizer() {
   ctx.fillRect(0, 0, width, height);
 
   // LED Strip Representation
-  const numLeds = 40;
+  const numLeds = 70;
   const ledWidth = (width - 20) / numLeds;
-  const ledHeight = 20;
+  const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
 
   for (let i = 0; i < numLeds; i++) {

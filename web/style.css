@@ -93,6 +93,17 @@ h2 {
   padding: 1.5rem;
 }
 
+.surface-plain {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.surface.surface-plain {
+  margin: 1rem 0;
+}
+
 .label {
   font-size: 0.7rem;
   letter-spacing: 0.25em;
@@ -200,38 +211,13 @@ textarea.input-control {
   outline: 2px solid var(--accent);
 }
 
-.input-indicators {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-}
-
-.box-indicator {
-  width: 120px;
-  height: 60px;
-  border-radius: 0.75rem;
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.box-indicator.active {
-  border-color: var(--accent);
-  color: var(--text-main);
-}
-
 canvas {
   display: block;
   margin: 1rem auto;
   background: var(--bg-base);
   border-radius: 0.75rem;
-  width: 100%;
-  max-width: 640px;
+  width: min(960px, 100%);
+  height: 70px;
 }
 
 .hint {

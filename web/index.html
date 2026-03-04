@@ -13,14 +13,14 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <nav class="surface center-content flex-gap">
+    <nav class="center-content flex-gap">
       <a href="index.html" class="active accent-button" aria-current="page">Game</a>
       <a href="manage.html" class="ghost-button">Manage Songs</a>
     </nav>
     <main>
       <h1>Rhythm Jump</h1>
       
-      <section id="game-status" class="surface">
+      <section id="game-status" class="surface surface-plain">
         <div class="status-grid">
           <div class="status-item surface center-content flex-gap">
             <span class="label">Session:</span>
@@ -33,7 +33,7 @@
         </div>
       </section>
 
-      <section id="song-selection" class="surface">
+      <section id="song-selection" class="surface surface-plain">
         <h2>Choose Song</h2>
         <div class="controls flex-gap">
           <select id="song-select" aria-label="Select Song" class="input-control">
@@ -44,16 +44,11 @@
         </div>
       </section>
 
-      <section id="visualization" class="surface">
-        <h2>Physical State</h2>
-        <div class="input-indicators flex-gap center-content">
-          <div id="box-left" class="box-indicator">Left Box</div>
-          <div id="box-right" class="box-indicator">Right Box</div>
-        </div>
+      <section id="visualization" class="surface surface-plain">
         <canvas
           id="visualizer"
-          width="600"
-          height="100"
+          width="960"
+          height="70"
           aria-label="LED Strip Visualization"
         ></canvas>
         <p class="hint">Keyboard: A/Space (Left), L/Enter (Right)</p>

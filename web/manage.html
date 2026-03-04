@@ -17,14 +17,14 @@
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
   </head>
   <body>
-    <nav class="surface center-content flex-gap">
+    <nav class="center-content flex-gap">
       <a href="index.html" class="ghost-button">Game</a>
       <a href="manage.html" class="accent-button active" aria-current="page">Manage Songs</a>
     </nav>
     <main>
       <h1>Song Management</h1>
       
-      <section id="upload-song" class="surface">
+      <section id="upload-song" class="surface surface-plain">
         <h2>Add New Song</h2>
         <form id="upload-form" class="flex-gap">
           <label>
@@ -40,7 +40,7 @@
         </form>
       </section>
 
-      <section id="edit-song" class="surface">
+      <section id="edit-song" class="surface surface-plain">
         <h2>Select Song to Edit</h2>
         <div class="controls flex-gap">
           <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
@@ -49,7 +49,7 @@
         </div>
       </section>
 
-      <section id="song-editor" class="hidden surface" aria-hidden="true">
+      <section id="song-editor" class="hidden surface surface-plain" aria-hidden="true">
         <h2 id="editor-title">Editing</h2>
         
         <div id="waveform-container">
