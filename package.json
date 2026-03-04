@@ -1,0 +1,22 @@
+{
+  "name": "rythm-jump",
+  "version": "1.0.0",
+  "description": "Rhythm Jump is a two-lane rhythm runner with a FastAPI backend and React web setup UI.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "eslint": "^10.0.2",
+    "markdownlint-cli2": "^0.21.0",
+    "stylelint": "^17.4.0"
+  }
+}

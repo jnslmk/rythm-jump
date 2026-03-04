@@ -7,7 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from rythm_jump.engine.session import GameSession, Mode
 
 router = APIRouter()
-MAX_SESSIONS = 100
+MAX_SESSIONS: int = 100
 _sessions: dict[str, GameSession] = {}
 _session_connection_counts: dict[str, int] = {}
 

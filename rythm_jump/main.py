@@ -1,7 +1,7 @@
 import asyncio
 import os
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -16,7 +16,29 @@ from rythm_jump.hw.gpio_input import read_contact_pressed
 
 FRONTEND_DIR = Path(__file__).parent.parent / "web"
 
-app = FastAPI(title="Rhythm Jump Backend")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.headless_task = None
+    app.state.headless_session = None
+
+    if is_headless_mode_enabled():
+        session = GameSession(mode=Mode.HEADLESS)
+        app.state.headless_session = session
+        app.state.headless_task = asyncio.create_task(_headless_polling_worker(session))
+
+    yield
+
+    task = getattr(app.state, "headless_task", None)
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    app.state.headless_task = None
+
+
+app = FastAPI(title="Rhythm Jump Backend", lifespan=lifespan)
 app.include_router(api_router, prefix="/api")
 app.include_router(charts_router, prefix="/api")
 app.include_router(ws_router)
@@ -47,29 +69,3 @@ async def _headless_polling_worker(
         except Exception as error:
             print(f"headless poll error: {error}")
         await asyncio.sleep(poll_interval_s)
-
-
-@app.on_event("startup")
-async def _startup_headless_runtime() -> None:
-    app.state.headless_task = None
-    app.state.headless_session = None
-
-    if not is_headless_mode_enabled():
-        return
-
-    session = GameSession(mode=Mode.HEADLESS)
-    app.state.headless_session = session
-    app.state.headless_task = asyncio.create_task(_headless_polling_worker(session))
-
-
-@app.on_event("shutdown")
-async def _shutdown_headless_runtime() -> None:
-    task = getattr(app.state, "headless_task", None)
-    if task is None:
-        return
-
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-    app.state.headless_task = None

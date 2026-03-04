@@ -58,7 +58,7 @@ def test_ws_session_rejects_non_object_payload() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/session/payload-session") as websocket:
             _receive_event(websocket, "session_state")
-            websocket.send_json(["ping"])  # type: ignore[arg-type]
+            websocket.send_json(["ping"])
             assert _receive_event(websocket, "error") == {
                 "type": "error",
                 "reason": "invalid_payload",
