@@ -5,7 +5,7 @@ from typing import Any
 
 def debounce_accept(last_ms: int, now_ms: int, threshold_ms: int) -> bool:
     if threshold_ms < 0:
-        raise ValueError('threshold_ms must be >= 0')
+        raise ValueError("threshold_ms must be >= 0")
     # If timestamps move backward, drop the event to avoid false positives.
     if now_ms < last_ms:
         return False
@@ -14,13 +14,13 @@ def debounce_accept(last_ms: int, now_ms: int, threshold_ms: int) -> bool:
 
 def _load_gpio_module() -> Any | None:
     try:
-        return importlib.import_module('RPi.GPIO')
+        return importlib.import_module("RPi.GPIO")
     except Exception:
         return None
 
 
 def _contact_pin() -> int:
-    raw_value = os.getenv('RHYTHM_CONTACT_PIN', '17')
+    raw_value = os.getenv("RHYTHM_CONTACT_PIN", "17")
     try:
         return int(raw_value)
     except ValueError:

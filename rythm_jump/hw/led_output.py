@@ -3,8 +3,7 @@ from typing import Protocol
 
 
 class LedOutput(Protocol):
-    def write_frame(self, active_indices: Sequence[int]) -> None:
-        ...
+    def write_frame(self, active_indices: Sequence[int]) -> None: ...
 
 
 class NoOpLedOutput:

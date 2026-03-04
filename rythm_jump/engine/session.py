@@ -2,14 +2,14 @@ from enum import StrEnum
 
 
 class Mode(StrEnum):
-    BROWSER_ATTACHED = 'browser_attached'
-    HEADLESS = 'headless'
+    BROWSER_ATTACHED = "browser_attached"
+    HEADLESS = "headless"
 
 
 class State(StrEnum):
-    IDLE = 'idle'
-    PLAYING = 'playing'
-    ABORTED_DISCONNECTED = 'aborted_disconnected'
+    IDLE = "idle"
+    PLAYING = "playing"
+    ABORTED_DISCONNECTED = "aborted_disconnected"
 
 
 class GameSession:
