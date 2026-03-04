@@ -10,6 +10,7 @@ from rhythm_jump.api.http import router as api_router
 from rhythm_jump.api.ws import router as ws_router
 from rhythm_jump.engine.session import GameSession, Mode
 from rhythm_jump.headless import run_headless_step
+from rhythm_jump.hw.gpio_input import read_contact_pressed
 
 app = FastAPI(title='Rhythm Jump Backend')
 app.include_router(api_router, prefix='/api')
@@ -21,20 +22,16 @@ def is_headless_mode_enabled() -> bool:
     return os.getenv('RHYTHM_HEADLESS_MODE') == '1'
 
 
-def read_contact_pressed() -> bool:
-    # Hardware integration is intentionally minimal for now.
-    return False
-
-
 def run_headless_polling_step(
-    session: GameSession, read_contact: Callable[[], bool] = read_contact_pressed
+    session: GameSession, read_contact: Callable[[], bool] | None = None
 ) -> bool:
-    return run_headless_step(session=session, contact_pressed=bool(read_contact()))
+    contact_reader = read_contact or read_contact_pressed
+    return run_headless_step(session=session, contact_pressed=bool(contact_reader()))
 
 
 async def _headless_polling_worker(
     session: GameSession,
-    read_contact: Callable[[], bool] = read_contact_pressed,
+    read_contact: Callable[[], bool] | None = None,
     poll_interval_s: float = 0.05,
 ) -> None:
     while True:
