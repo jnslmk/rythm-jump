@@ -31,12 +31,13 @@ export function CalibrationPanel({
           value={travelTimeMs}
           onChange={(event) => {
             const value = parseIntegerInput(event.target.value);
-            if (value !== null) {
+            if (value !== null && value > 0) {
               onTravelTimeChange(value);
             }
           }}
         />
       </label>
+      <p>Travel time must be greater than 0 ms.</p>
       <label>
         Global offset (ms)
         <input
