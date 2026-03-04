@@ -24,7 +24,9 @@ def save_chart(song_id: str, chart: Chart) -> dict[str, object]:
         raise HTTPException(status_code=400, detail='song_id_mismatch')
 
     song_dir = _charts_root_dir() / song_id
-    song_dir.mkdir(parents=True, exist_ok=True)
+    if not song_dir.exists() or not song_dir.is_dir():
+        raise HTTPException(status_code=404, detail='unknown_song_id')
+
     chart_path = song_dir / 'chart.json'
     chart_path.write_text(json.dumps(chart.model_dump(mode='json'), indent=2), encoding='utf-8')
 

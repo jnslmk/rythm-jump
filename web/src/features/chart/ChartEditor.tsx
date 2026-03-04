@@ -19,13 +19,31 @@ type ChartEditorProps = {
   onSave: (payload: ChartSavePayload) => void | Promise<void>;
 };
 
-function parseTimings(value: string): number[] {
-  return value
+type ParseResult = {
+  ok: true;
+  values: number[];
+};
+
+type ParseFailure = {
+  ok: false;
+};
+
+function parseTimings(value: string): ParseResult | ParseFailure {
+  const entries = value
     .split(',')
     .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-    .map((entry) => Number(entry))
-    .filter((entry) => Number.isFinite(entry));
+    .filter((entry) => entry.length > 0);
+
+  const values: number[] = [];
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) {
+      return { ok: false };
+    }
+
+    values.push(Number.parseInt(entry, 10));
+  }
+
+  return { ok: true, values };
 }
 
 export function ChartEditor({ songId, travelTimeMs, globalOffsetMs, onSave }: ChartEditorProps) {
@@ -34,6 +52,13 @@ export function ChartEditor({ songId, travelTimeMs, globalOffsetMs, onSave }: Ch
   const [status, setStatus] = useState<string>('idle');
 
   const handleSave = async () => {
+    const left = parseTimings(leftInput);
+    const right = parseTimings(rightInput);
+    if (!left.ok || !right.ok) {
+      setStatus('Invalid timings');
+      return;
+    }
+
     const payload: ChartSavePayload = {
       song_id: songId,
       travel_time_ms: travelTimeMs,
@@ -42,12 +67,16 @@ export function ChartEditor({ songId, travelTimeMs, globalOffsetMs, onSave }: Ch
         perfect: 50,
         good: 100
       },
-      left: parseTimings(leftInput),
-      right: parseTimings(rightInput)
+      left: left.values,
+      right: right.values
     };
 
-    await onSave(payload);
-    setStatus('saved');
+    try {
+      await onSave(payload);
+      setStatus('Saved');
+    } catch {
+      setStatus('Save failed');
+    }
   };
 
   return (

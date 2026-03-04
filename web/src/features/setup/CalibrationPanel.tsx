@@ -5,6 +5,15 @@ type CalibrationPanelProps = {
   onGlobalOffsetChange: (value: number) => void;
 };
 
+function parseIntegerInput(value: string): number | null {
+  if (!/^-?\d+$/.test(value.trim())) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function CalibrationPanel({
   travelTimeMs,
   globalOffsetMs,
@@ -20,7 +29,12 @@ export function CalibrationPanel({
           aria-label="Travel time (ms)"
           type="number"
           value={travelTimeMs}
-          onChange={(event) => onTravelTimeChange(Number(event.target.value))}
+          onChange={(event) => {
+            const value = parseIntegerInput(event.target.value);
+            if (value !== null) {
+              onTravelTimeChange(value);
+            }
+          }}
         />
       </label>
       <label>
@@ -29,7 +43,12 @@ export function CalibrationPanel({
           aria-label="Global offset (ms)"
           type="number"
           value={globalOffsetMs}
-          onChange={(event) => onGlobalOffsetChange(Number(event.target.value))}
+          onChange={(event) => {
+            const value = parseIntegerInput(event.target.value);
+            if (value !== null) {
+              onGlobalOffsetChange(value);
+            }
+          }}
         />
       </label>
     </fieldset>
