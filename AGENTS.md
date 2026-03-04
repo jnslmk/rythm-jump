@@ -8,7 +8,7 @@
 `scripts/` contains local helpers, `docs/` contains runbooks/plans, and `systemd/` contains Raspberry Pi service units.
 
 ## Build, Test, and Development Commands
-- `uv sync --group dev` - install Python dependencies and dev tooling.
+- `uv sync --group dev` - install Python dependencies and dev tooling. Use `uv` directly for dependency management and avoid using pip-compat shims like `uv pip` or similar wrappers.
 - `./scripts/dev.sh` - start FastAPI with auto-reload.
 - `uv run pytest -q` - run backend tests.
 - `uv run ruff check . && uv run ruff format .` - lint and format Python.

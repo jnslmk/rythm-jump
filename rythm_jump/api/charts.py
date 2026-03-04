@@ -1,9 +1,23 @@
+import collections
+from collections import abc as collections_abc
 import json
+import numpy as np
 import re
 from pathlib import Path
 
+if not hasattr(collections, "MutableSequence"):
+    collections.MutableSequence = collections_abc.MutableSequence
+
+if not hasattr(np, "float"):
+    setattr(np, "float", float)
+
+if not hasattr(np, "int"):
+    setattr(np, "int", int)
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from madmom.features.beats import RNNBeatProcessor
+from madmom.features.tempo import TempoEstimationProcessor
 from rythm_jump.models.chart import Chart, JudgementWindowsMs
 
 
@@ -14,6 +28,39 @@ _SONG_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 def _charts_root_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "songs"
+
+
+def _audio_file_for_song(song_id: str) -> Path | None:
+    song_dir = _charts_root_dir() / song_id
+    if not song_dir.exists():
+        return None
+
+    default_path = song_dir / "audio.mp3"
+    if default_path.exists():
+        return default_path
+
+    for candidate in sorted(song_dir.glob("audio.*")):
+        if candidate.is_file():
+            return candidate
+
+    return None
+
+
+def _estimate_bpm_from_audio(audio_path: Path) -> float:
+    beat_processor = RNNBeatProcessor()
+    tempo_processor = TempoEstimationProcessor()
+    activations = beat_processor(str(audio_path))
+    tempos = tempo_processor(activations)
+    if len(tempos) == 0:
+        raise ValueError("no_tempo_detected")
+
+    bpm_candidate = float(tempos[0][0])
+    while bpm_candidate < 60:
+        bpm_candidate *= 2
+    while bpm_candidate > 180:
+        bpm_candidate /= 2
+
+    return round(bpm_candidate, 1)
 
 
 @router.get("/songs")
@@ -49,14 +96,8 @@ def get_audio(song_id: str) -> FileResponse:
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
-    audio_path = _charts_root_dir() / song_id / "audio.mp3"
-    if not audio_path.exists():
-        song_dir = _charts_root_dir() / song_id
-        if not song_dir.exists():
-            raise HTTPException(status_code=404, detail="audio_not_found")
-        for candidate in sorted(song_dir.glob("audio.*")):
-            if candidate.is_file():
-                return FileResponse(candidate)
+    audio_path = _audio_file_for_song(song_id)
+    if not audio_path:
         raise HTTPException(status_code=404, detail="audio_not_found")
 
     return FileResponse(audio_path)
@@ -118,3 +159,20 @@ def save_chart(song_id: str, chart: Chart) -> dict[str, object]:
     )
 
     return {"ok": True, "song_id": song_id}
+
+
+@router.get("/charts/{song_id}/tempo")
+def analyze_chart_tempo(song_id: str) -> dict[str, float]:
+    if not _SONG_ID_PATTERN.fullmatch(song_id):
+        raise HTTPException(status_code=400, detail="invalid_song_id")
+
+    audio_path = _audio_file_for_song(song_id)
+    if not audio_path:
+        raise HTTPException(status_code=404, detail="audio_not_found")
+
+    try:
+        bpm = _estimate_bpm_from_audio(audio_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="tempo_analysis_failed") from exc
+
+    return {"bpm": bpm}

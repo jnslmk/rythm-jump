@@ -287,63 +287,39 @@ function updateBeatGrid() {
 }
 
 async function analyzeBpm() {
-  if (!wavesurfer) return;
-  const decodedData = wavesurfer.getDecodedData();
-  if (!decodedData) return;
-
   const status = document.getElementById('save-status');
+  if (!currentSongId) {
+    status.textContent = 'Select a song before analyzing';
+    return;
+  }
+
   status.textContent = 'Analyzing...';
 
   try {
-    const data = decodedData.getChannelData(0);
-    const sampleRate = decodedData.sampleRate;
-    
-    // Very basic beat detection: find peaks in volume
-    const step = Math.floor(sampleRate * 0.05); // 50ms windows
-    const peaks = [];
-    const threshold = 0.5;
-    
-    for (let i = 0; i < data.length; i += step) {
-      let max = 0;
-      for (let j = 0; j < step && i + j < data.length; j++) {
-        const val = Math.abs(data[i + j]);
-        if (val > max) max = val;
-      }
-      if (max > threshold) {
-        peaks.push(i / sampleRate);
-      }
+    const response = await fetch(
+      `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/tempo`
+    );
+    if (!response.ok) {
+      const detail = (await response.text()) || response.statusText;
+      throw new Error(detail || 'Analysis failed');
     }
 
-    if (peaks.length < 2) {
-      status.textContent = 'Could not detect BPM';
-      return;
+    const payload = await response.json();
+    const bpm = parseFloat(payload?.bpm);
+    if (!Number.isFinite(bpm) || bpm <= 0) {
+      throw new Error('Tempo not detected');
     }
 
-    // Find common intervals
-    const intervals = [];
-    for (let i = 1; i < peaks.length; i++) {
-      intervals.push(peaks[i] - peaks[i-1]);
-    }
-    
-    // Sort and find median-ish interval
-    intervals.sort((a, b) => a - b);
-    const medianInterval = intervals[Math.floor(intervals.length / 2)];
-    let bpm = 60 / medianInterval;
-    
-    // Normalize to reasonable range (60-180)
-    while (bpm < 60) bpm *= 2;
-    while (bpm > 180) bpm /= 2;
-    
-    bpm = Math.round(bpm * 10) / 10;
-    
     document.getElementById('song-bpm').value = bpm;
     state.bpm = bpm;
     updateBeatGrid();
     status.textContent = 'BPM detected: ' + bpm;
-    setTimeout(() => { status.textContent = ''; }, 3000);
+    setTimeout(() => {
+      status.textContent = '';
+    }, 3000);
   } catch (e) {
     console.error(e);
-    status.textContent = 'Analysis failed';
+    status.textContent = e instanceof Error ? e.message : 'Analysis failed';
   }
 }
 
