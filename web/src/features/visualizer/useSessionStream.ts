@@ -24,6 +24,10 @@ export function buildSessionStreamUrl(sessionId: string, location: LocationInfo)
   return `${protocol}//${location.host}/ws/session/${sessionId}`;
 }
 
+export function resetStreamLevels(_: VisualizerLevels): VisualizerLevels {
+  return [...DEFAULT_LEVELS];
+}
+
 function clampLevel(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
@@ -52,9 +56,11 @@ export function reduceStreamLevels(
 }
 
 export function useSessionStream(sessionId = DEFAULT_SESSION_ID) {
-  const [levels, setLevels] = useState<VisualizerLevels>([...DEFAULT_LEVELS]);
+  const [levels, setLevels] = useState<VisualizerLevels>(resetStreamLevels([0, 0]));
 
   useEffect(() => {
+    setLevels((previous) => resetStreamLevels(previous));
+
     if (typeof WebSocket === 'undefined') {
       return;
     }
