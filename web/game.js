@@ -37,6 +37,81 @@ let state = {
   sessionStartMs: null,
 };
 
+let gameWaveSurfer = null;
+
+function isSessionPlaying() {
+  return state.runStatus === 'playing';
+}
+
+function updateControlStates() {
+  const startBtn = document.getElementById('btn-start');
+  const stopBtn = document.getElementById('btn-stop');
+  const playing = isSessionPlaying();
+
+  if (startBtn) {
+    startBtn.textContent = playing ? 'Pause Game' : 'Start Game';
+    startBtn.classList.toggle('ghost-button', playing);
+    startBtn.classList.toggle('accent-button', !playing);
+  }
+
+  if (stopBtn) {
+    stopBtn.disabled = !playing;
+  }
+}
+
+function stopAudioPlayback() {
+  const audio = ensureAudioElement();
+  audio.pause();
+  audio.currentTime = 0;
+}
+
+function requestStopSession(clearScreen) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'stop_session' }));
+  }
+  stopAudioPlayback();
+  if (clearScreen) {
+    resetSessionState();
+  }
+  state.runStatus = 'idle';
+  updateUI();
+}
+
+function initGameWaveform() {
+  if (gameWaveSurfer) return;
+  if (typeof WaveSurfer === 'undefined') return;
+
+  const Timeline = window.TimelinePlugin || WaveSurfer.Timeline || (WaveSurfer.plugins && WaveSurfer.plugins.Timeline);
+  const timelinePlugin = Timeline
+    ? Timeline.create({ container: '#game-timeline' })
+    : null;
+
+  const config = {
+    container: '#waveform',
+    waveColor: '#4f46e5',
+    progressColor: '#3b82f6',
+    cursorColor: '#f43f5e',
+    barWidth: 2,
+    barRadius: 3,
+    height: 120,
+    responsive: true
+  };
+
+  if (timelinePlugin) {
+    config.plugins = [timelinePlugin];
+  }
+
+  gameWaveSurfer = WaveSurfer.create(config);
+}
+
+function loadGameWaveform(songId) {
+  if (!songId) return;
+  initGameWaveform();
+  if (!gameWaveSurfer) return;
+  const url = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
+  gameWaveSurfer.load(url);
+}
+
 function formatMs(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     return '--';
@@ -280,6 +355,7 @@ function recordButtonPress(lane) {
 }
 
 function resetSessionState() {
+  stopAudioPlayback();
   state.activeBars = {};
   state.triggerTimeline.left = [];
   state.triggerTimeline.right = [];
@@ -305,6 +381,7 @@ function updateUI() {
   if (select.value) {
     state.songId = select.value;
   }
+  updateControlStates();
 }
 
 function connectWebSocket() {
@@ -318,9 +395,6 @@ function connectWebSocket() {
       if (payload.type === 'session_state') {
         state.runStatus = payload.state;
         updateUI();
-        if (payload.state === 'idle') {
-          resetSessionState();
-        }
         renderDebugPanel();
         return;
       }
@@ -395,6 +469,7 @@ async function loadChart(songId) {
     state.chart = chartData;
     state.chartDurationMs = computeChartDuration(chartData);
     state.remainingMs = state.chartDurationMs;
+    loadGameWaveform(songId);
     renderDebugPanel();
   } catch (error) {
     console.error('Failed to load chart:', error);
@@ -450,47 +525,56 @@ async function startAudioPlayback(songId) {
 }
 
 function init() {
-  document.getElementById('btn-start').addEventListener('click', async () => {
-    const songId = document.getElementById('song-select').value;
-    if (!songId) return window.alert('Select a song first!');
-    
-    state.runStatus = 'Buffering';
-    updateUI();
-
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      resetSessionState();
-      if (!state.chart || state.chart.song_id !== songId) {
-        await loadChart(songId);
-      }
-      state.sessionStartMs = Date.now();
-      state.sessionProgressMs = 0;
-      state.remainingMs = state.chartDurationMs;
-      renderDebugPanel();
-
-      try {
-        await startAudioPlayback(songId);
-      } catch (error) {
-        console.error('Playback failed', error);
-        state.runStatus = 'Playback blocked';
-        updateUI();
+  const startButton = document.getElementById('btn-start');
+  if (startButton) {
+    startButton.addEventListener('click', async () => {
+      if (isSessionPlaying()) {
+        requestStopSession(false);
         return;
       }
 
-      socket.send(JSON.stringify({
-        type: 'start_session',
-        song_id: songId
-      }));
-      state.songId = songId;
+      const songId = document.getElementById('song-select').value;
+      if (!songId) return window.alert('Select a song first!');
+      
+      state.runStatus = 'Buffering';
       updateUI();
-    }
-  });
 
-  document.getElementById('btn-stop').addEventListener('click', () => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'stop_session' }));
-      resetSessionState();
-    }
-  });
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        resetSessionState();
+        if (!state.chart || state.chart.song_id !== songId) {
+          await loadChart(songId);
+        }
+        state.sessionStartMs = Date.now();
+        state.sessionProgressMs = 0;
+        state.remainingMs = state.chartDurationMs;
+        renderDebugPanel();
+
+        try {
+          await startAudioPlayback(songId);
+        } catch (error) {
+          console.error('Playback failed', error);
+          state.runStatus = 'Playback blocked';
+          updateUI();
+          return;
+        }
+
+        socket.send(JSON.stringify({
+          type: 'start_session',
+          song_id: songId
+        }));
+        state.songId = songId;
+        updateUI();
+      }
+    });
+  }
+
+  const stopButton = document.getElementById('btn-stop');
+  if (stopButton) {
+    stopButton.addEventListener('click', () => {
+      if (!isSessionPlaying()) return;
+      requestStopSession(true);
+    });
+  }
 
   document.getElementById('song-select').addEventListener('change', async (event) => {
     const songId = event.target.value;
@@ -504,6 +588,7 @@ function init() {
 
   setDebugVisibility(state.debugVisible);
   renderDebugPanel();
+  initGameWaveform();
 
     window.addEventListener('keydown', handleKeydown);
   
