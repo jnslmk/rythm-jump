@@ -21,7 +21,7 @@ export type VisualizerLevels = [number, number];
 
 export function buildSessionStreamUrl(sessionId: string, location: LocationInfo): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${location.host}/ws/session/${sessionId}`;
+  return `${protocol}//${location.host}/ws/session/${encodeURIComponent(sessionId)}`;
 }
 
 export function resetStreamLevels(_: VisualizerLevels): VisualizerLevels {

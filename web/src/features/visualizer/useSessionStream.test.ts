@@ -16,6 +16,17 @@ describe('buildSessionStreamUrl', () => {
 
     expect(url).toBe('wss://example.com/ws/session/session-42');
   });
+
+  it('encodes reserved characters in session id path', () => {
+    const url = buildSessionStreamUrl('id/with ?query#hash and space', {
+      protocol: 'https:',
+      host: 'example.com'
+    });
+
+    expect(url).toBe(
+      'wss://example.com/ws/session/id%2Fwith%20%3Fquery%23hash%20and%20space'
+    );
+  });
 });
 
 describe('reduceStreamLevels', () => {
