@@ -53,6 +53,50 @@
       ></canvas>
       <p class="hint">Keyboard: A/Space (Left), L/Enter (Right)</p>
     </section>
+
+    <section id="debug-panel" class="surface surface-plain debug-panel">
+      <div class="debug-header">
+        <h2>Debug Overlay</h2>
+        <button id="btn-toggle-debug" class="ghost-button" type="button">Hide overlay</button>
+      </div>
+      <div class="debug-body">
+        <div class="debug-row">
+          <div>
+            <span class="label">Remaining play time:</span>
+            <span id="debug-remaining-time">--</span>
+          </div>
+          <div class="timing-windows">
+            <span class="label">Timing zones:</span>
+            <span id="debug-perfect-window">Perfect ±0 ms</span>
+            <span id="debug-good-window">Good ±0 ms</span>
+          </div>
+        </div>
+        <div class="lane-panels">
+          <div class="lane-panel">
+            <div class="lane-title">Left Lane</div>
+            <div class="timeline-group">
+              <span class="timeline-label">Triggers</span>
+              <div id="left-trigger-timeline" class="timeline-list"></div>
+            </div>
+            <div class="timeline-group">
+              <span class="timeline-label">Button presses</span>
+              <div id="left-press-timeline" class="timeline-list"></div>
+            </div>
+          </div>
+          <div class="lane-panel">
+            <div class="lane-title">Right Lane</div>
+            <div class="timeline-group">
+              <span class="timeline-label">Triggers</span>
+              <div id="right-trigger-timeline" class="timeline-list"></div>
+            </div>
+            <div class="timeline-group">
+              <span class="timeline-label">Button presses</span>
+              <div id="right-press-timeline" class="timeline-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
   <audio id="song-audio" preload="auto" hidden></audio>
   <script src="game.js"></script>

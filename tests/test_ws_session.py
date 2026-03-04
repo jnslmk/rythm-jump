@@ -32,7 +32,10 @@ def test_playback_emits_bar_frame_event() -> None:
                 if payload.get("type") == "bar_frame":
                     bar_frame = payload
                     break
+
             assert bar_frame is not None, "expected bar_frame but none arrived"
             assert bar_frame["lane"] in {"left", "right"}
             assert isinstance(bar_frame["hit_time_ms"], int)
-            assert "travel_time_ms" in bar_frame
+            assert isinstance(bar_frame["travel_time_ms"], int)
+            assert isinstance(bar_frame["progress_ms"], int)
+            assert isinstance(bar_frame["remaining_ms"], int)
