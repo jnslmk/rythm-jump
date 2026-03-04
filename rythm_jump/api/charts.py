@@ -13,7 +13,7 @@ _SONG_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _charts_root_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "songs"
+    return Path(__file__).resolve().parents[2] / "songs"
 
 
 @router.get("/songs")
@@ -51,11 +51,12 @@ def get_audio(song_id: str) -> FileResponse:
 
     audio_path = _charts_root_dir() / song_id / "audio.mp3"
     if not audio_path.exists():
-        # Try any file starting with audio and ending in common formats
-        for ext in [".mp3", ".wav", ".ogg", ".aac", ".m4a"]:
-            p = _charts_root_dir() / song_id / f"audio{ext}"
-            if p.exists():
-                return FileResponse(p)
+        song_dir = _charts_root_dir() / song_id
+        if not song_dir.exists():
+            raise HTTPException(status_code=404, detail="audio_not_found")
+        for candidate in sorted(song_dir.glob("audio.*")):
+            if candidate.is_file():
+                return FileResponse(candidate)
         raise HTTPException(status_code=404, detail="audio_not_found")
 
     return FileResponse(audio_path)

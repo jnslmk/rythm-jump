@@ -18,6 +18,8 @@ let state = {
   songs: []
 };
 
+let audioElement = null;
+
 let socket = null;
 
 function buildSessionStreamUrl(sessionId) {
@@ -30,6 +32,10 @@ function clampLevel(value) {
 }
 
 function reduceStreamLevels(levels, event) {
+  if (event.type === 'led_frame' && Array.isArray(event.levels)) {
+    return event.levels.map(clampLevel);
+  }
+
   if (event.type === 'lane_event') {
     const isLeft = event.lane === 'left';
     const isRight = event.lane === 'right';
@@ -114,7 +120,15 @@ function connectWebSocket() {
       if (payload.type === 'session_state') {
         state.runStatus = payload.state;
         updateUI();
+        return;
       }
+
+      if (payload.type === 'led_frame' && Array.isArray(payload.levels)) {
+        state.levels = payload.levels.map(clampLevel);
+        renderVisualizer();
+        return;
+      }
+
       state.levels = reduceStreamLevels(state.levels, payload);
       renderVisualizer();
     } catch (e) {
@@ -163,16 +177,58 @@ function handleKeydown(event) {
   updateUI();
 }
 
+function ensureAudioElement() {
+  if (audioElement) return audioElement;
+  audioElement = document.getElementById('song-audio');
+  if (!audioElement) {
+    audioElement = document.createElement('audio');
+    audioElement.id = 'song-audio';
+    audioElement.hidden = true;
+    audioElement.preload = 'auto';
+    document.body.appendChild(audioElement);
+  }
+  return audioElement;
+}
+
+async function startAudioPlayback(songId) {
+  const audio = ensureAudioElement();
+  audio.pause();
+  audio.currentTime = 0;
+  audio.src = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
+  audio.load();
+  const previousMuted = audio.muted;
+  audio.muted = true;
+  try {
+    await audio.play();
+  } finally {
+    audio.muted = previousMuted;
+  }
+}
+
 function init() {
-  document.getElementById('btn-start').addEventListener('click', () => {
+  document.getElementById('btn-start').addEventListener('click', async () => {
     const songId = document.getElementById('song-select').value;
-    if (!songId) return alert('Select a song first!');
+    if (!songId) return window.alert('Select a song first!');
     
+    state.runStatus = 'Buffering';
+    updateUI();
+
     if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        await startAudioPlayback(songId);
+      } catch (error) {
+        console.error('Playback failed', error);
+        state.runStatus = 'Playback blocked';
+        updateUI();
+        return;
+      }
+
       socket.send(JSON.stringify({
         type: 'start_session',
         song_id: songId
       }));
+      state.songId = songId;
+      updateUI();
     }
   });
 
@@ -182,20 +238,20 @@ function init() {
     }
   });
 
-  window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('keydown', handleKeydown);
   
   fetchSongs();
   connectWebSocket();
   
   // Animation loop for smooth decay if no clock ticks
-  function animate() {
-    state.levels = [
-      clampLevel(state.levels[0] * 0.95),
-      clampLevel(state.levels[1] * 0.95)
-    ];
-    renderVisualizer();
-    requestAnimationFrame(animate);
-  }
+    function animate() {
+      state.levels = [
+        clampLevel(state.levels[0] * 0.95),
+        clampLevel(state.levels[1] * 0.95)
+      ];
+      renderVisualizer();
+      window.requestAnimationFrame(animate);
+    }
   animate();
 }
 
