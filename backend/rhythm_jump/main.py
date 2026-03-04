@@ -38,7 +38,10 @@ async def _headless_polling_worker(
     poll_interval_s: float = 0.05,
 ) -> None:
     while True:
-        run_headless_polling_step(session=session, read_contact=read_contact)
+        try:
+            run_headless_polling_step(session=session, read_contact=read_contact)
+        except Exception as error:
+            print(f'headless poll error: {error}')
         await asyncio.sleep(poll_interval_s)
 
 
