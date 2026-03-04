@@ -18,3 +18,21 @@ def test_start_session_emits_led_frame() -> None:
             assert led_frame is not None, "expected led_frame but none arrived"
             assert "levels" in led_frame
             assert len(led_frame["levels"]) == 2
+
+
+def test_playback_emits_bar_frame_event() -> None:
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session/default-session") as socket:
+            socket.receive_json()  # initial session_state
+            socket.send_json({"type": "start_session", "song_id": "demo"})
+
+            bar_frame = None
+            for _ in range(60):
+                payload = socket.receive_json()
+                if payload.get("type") == "bar_frame":
+                    bar_frame = payload
+                    break
+            assert bar_frame is not None, "expected bar_frame but none arrived"
+            assert bar_frame["lane"] in {"left", "right"}
+            assert isinstance(bar_frame["hit_time_ms"], int)
+            assert "travel_time_ms" in bar_frame

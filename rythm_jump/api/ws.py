@@ -2,6 +2,7 @@ import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
+from typing import TypedDict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -14,6 +15,13 @@ router = APIRouter()
 
 TICK_INTERVAL_S = 0.1
 DECAY_FACTOR = 0.85
+
+
+class _ActiveBar(TypedDict):
+    lane: str
+    hit_time_ms: int
+    spawn_ms: int
+    travel_time_ms: int
 
 
 def _find_audio_path(song_id: str) -> Path | None:
@@ -57,6 +65,8 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
             right_level = 0.0
             progress_ms = 0
             duration = _chart_duration_ms(chart)
+            tick_ms = int(TICK_INTERVAL_S * 1000)
+            active_bars: list[_ActiveBar] = []
             try:
                 while progress_ms <= duration and session.state == State.PLAYING:
                     while (
@@ -72,6 +82,14 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
                             }
                         )
                         session.handle_input("left")
+                        active_bars.append(
+                            {
+                                "lane": "left",
+                                "hit_time_ms": chart.left[left_idx],
+                                "spawn_ms": progress_ms,
+                                "travel_time_ms": chart.travel_time_ms,
+                            }
+                        )
                         left_idx += 1
 
                     while (
@@ -87,7 +105,35 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
                             }
                         )
                         session.handle_input("right")
+                        active_bars.append(
+                            {
+                                "lane": "right",
+                                "hit_time_ms": chart.right[right_idx],
+                                "spawn_ms": progress_ms,
+                                "travel_time_ms": chart.travel_time_ms,
+                            }
+                        )
                         right_idx += 1
+
+                    remaining_ms = max(duration - progress_ms, 0)
+                    next_active_bars: list[_ActiveBar] = []
+                    for bar in active_bars:
+                        bar_progress_ms = max(progress_ms - bar["spawn_ms"], 0)
+                        bar_progress_ms = min(bar_progress_ms, bar["travel_time_ms"])
+                        await websocket.send_json(
+                            {
+                                "type": "bar_frame",
+                                "session_id": session_id,
+                                "lane": bar["lane"],
+                                "hit_time_ms": bar["hit_time_ms"],
+                                "travel_time_ms": bar["travel_time_ms"],
+                                "progress_ms": bar_progress_ms,
+                                "remaining_ms": remaining_ms,
+                            }
+                        )
+                        if bar_progress_ms < bar["travel_time_ms"]:
+                            next_active_bars.append(bar)
+                    active_bars = next_active_bars
 
                     await websocket.send_json(
                         {
@@ -99,7 +145,7 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
                     )
 
                     await asyncio.sleep(TICK_INTERVAL_S)
-                    progress_ms += int(TICK_INTERVAL_S * 1000)
+                    progress_ms += tick_ms
                     left_level = max(left_level * DECAY_FACTOR, 0.0)
                     right_level = max(right_level * DECAY_FACTOR, 0.0)
             except asyncio.CancelledError:  # pragma: no cover - cleanup only
