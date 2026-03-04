@@ -9,39 +9,39 @@
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
   </head>
   <body>
-    <nav>
-      <a href="index.html">Game</a>
-      <a href="manage.html" class="active">Manage Songs</a>
+    <nav class="surface center-content flex-gap">
+      <a href="index.html" class="ghost-button">Game</a>
+      <a href="manage.html" class="accent-button active">Manage Songs</a>
     </nav>
     <main>
       <h1>Song Management</h1>
       
-      <section id="upload-song">
+      <section id="upload-song" class="surface">
         <h2>Add New Song</h2>
-        <form id="upload-form">
+        <form id="upload-form" class="flex-gap">
           <label>
-            Song ID (slug)
-            <input id="new-song-id" type="text" placeholder="my-awesome-song" required />
+            <span class="label">Song ID (slug)</span>
+            <input id="new-song-id" type="text" placeholder="my-awesome-song" required class="input-control" />
           </label>
           <label>
-            Audio File
-            <input id="new-song-audio" type="file" accept="audio/*" required />
+            <span class="label">Audio File</span>
+            <input id="new-song-audio" type="file" accept="audio/*" required class="input-control" />
           </label>
-          <button type="submit">Upload</button>
+          <button type="submit" class="accent-button">Upload</button>
           <span id="upload-status"></span>
         </form>
       </section>
 
-      <section id="edit-song">
+      <section id="edit-song" class="surface">
         <h2>Select Song to Edit</h2>
-        <div class="controls">
-          <select id="song-edit-select" aria-label="Select Song to Edit">
+        <div class="controls flex-gap">
+          <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
             <option value="">Loading songs...</option>
           </select>
         </div>
       </section>
 
-      <section id="song-editor" class="hidden">
+      <section id="song-editor" class="hidden surface">
         <h2 id="editor-title">Editing</h2>
         
         <div id="waveform-container">
@@ -50,8 +50,8 @@
         </div>
         
         <div class="editor-controls">
-          <button id="btn-play-pause">Play / Pause</button>
-          <button id="btn-stop-audio" class="secondary">Stop</button>
+          <button id="btn-play-pause" class="accent-button">Play / Pause</button>
+          <button id="btn-stop-audio" class="ghost-button">Stop</button>
           <span id="audio-time">0:00 / 0:00</span>
         </div>
 
@@ -59,29 +59,29 @@
           <fieldset>
             <legend>BPM & Timing</legend>
             <label>
-              BPM
-              <input id="song-bpm" type="number" step="0.1" value="120" />
+              <span class="label">BPM</span>
+              <input id="song-bpm" type="number" step="0.1" value="120" class="input-control" />
             </label>
             <label>
-              Global Offset (ms)
-              <input id="global-offset" type="number" value="0" />
+              <span class="label">Global Offset (ms)</span>
+              <input id="global-offset" type="number" value="0" class="input-control" />
             </label>
             <div class="bpm-actions">
-              <button id="btn-tap-bpm" type="button">Tap BPM</button>
-              <button id="btn-analyze-bpm" type="button" class="secondary">Analyze BPM (placeholder)</button>
+              <button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button>
+              <button id="btn-analyze-bpm" type="button" class="ghost-button">Analyze BPM (placeholder)</button>
             </div>
           </fieldset>
           
-          <div class="manual-timings">
+          <div class="manual-timings flex-gap">
             <label>
-              Left Timings (ms)
-              <textarea id="left-timings" placeholder="1000, 2000, ..."></textarea>
+              <span class="label">Left Timings (ms)</span>
+              <textarea id="left-timings" placeholder="1000, 2000, ..." class="input-control"></textarea>
             </label>
             <label>
-              Right Timings (ms)
-              <textarea id="right-timings" placeholder="1500, 2500, ..."></textarea>
+              <span class="label">Right Timings (ms)</span>
+              <textarea id="right-timings" placeholder="1500, 2500, ..." class="input-control"></textarea>
             </label>
-            <button id="btn-save-chart">Save Chart</button>
+            <button id="btn-save-chart" class="accent-button">Save Chart</button>
             <span id="save-status"></span>
           </div>
         </div>

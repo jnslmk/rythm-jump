@@ -7,14 +7,14 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <nav>
-      <a href="index.html" class="active">Game</a>
-      <a href="manage.html">Manage Songs</a>
+    <nav class="surface center-content flex-gap">
+      <a href="index.html" class="active accent-button">Game</a>
+      <a href="manage.html" class="ghost-button">Manage Songs</a>
     </nav>
     <main>
       <h1>Rhythm Jump</h1>
       
-      <section id="game-status">
+      <section id="game-status" class="surface">
         <div class="status-grid">
           <div class="status-item">
             <span class="label">Session:</span>
@@ -27,20 +27,20 @@
         </div>
       </section>
 
-      <section id="song-selection">
+      <section id="song-selection" class="surface">
         <h2>Choose Song</h2>
-        <div class="controls">
-          <select id="song-select" aria-label="Select Song">
+        <div class="controls flex-gap">
+          <select id="song-select" aria-label="Select Song" class="input-control">
             <option value="">Loading songs...</option>
           </select>
-          <button id="btn-start" type="button">Start Game</button>
-          <button id="btn-stop" type="button" class="secondary">Stop</button>
+          <button id="btn-start" type="button" class="accent-button">Start Game</button>
+          <button id="btn-stop" type="button" class="ghost-button">Stop</button>
         </div>
       </section>
 
-      <section id="visualization">
+      <section id="visualization" class="surface">
         <h2>Physical State</h2>
-        <div class="input-indicators">
+        <div class="input-indicators flex-gap center-content">
           <div id="box-left" class="box-indicator">Left Box</div>
           <div id="box-right" class="box-indicator">Right Box</div>
         </div>
