@@ -14,15 +14,15 @@ from rythm_jump.engine.session import GameSession, Mode
 from rythm_jump.headless import run_headless_step
 from rythm_jump.hw.gpio_input import read_contact_pressed
 
-FRONTEND_DIST = Path(__file__).parent.parent / "web" / "dist"
+FRONTEND_DIR = Path(__file__).parent.parent / "web"
 
 app = FastAPI(title="Rhythm Jump Backend")
 app.include_router(api_router, prefix="/api")
 app.include_router(charts_router, prefix="/api")
 app.include_router(ws_router)
 
-if FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static")
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
 
 
 def is_headless_mode_enabled() -> bool:

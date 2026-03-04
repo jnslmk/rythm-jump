@@ -4,9 +4,79 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rhythm Jump</title>
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <main>
+      <h1>Rhythm Jump Setup</h1>
+      <p>Keyboard mode: left (A, Space), right (L, Enter)</p>
+      <p>Last action: <span id="last-action">none</span></p>
+      <p>Run status: <span id="run-status">browser-attached | demo | idle</span></p>
+
+      <section>
+        <h2>Setup</h2>
+        <label>
+          Runtime mode
+          <select id="runtime-mode" aria-label="Runtime mode">
+            <option value="browser-attached">browser-attached</option>
+            <option value="headless">headless</option>
+          </select>
+        </label>
+        <label>
+          Song
+          <select id="song-select" aria-label="Song">
+            <option value="demo">demo</option>
+          </select>
+        </label>
+        <fieldset>
+          <legend>Calibration</legend>
+          <label>
+            Travel time (ms)
+            <input
+              id="travel-time"
+              aria-label="Travel time (ms)"
+              type="number"
+              value="1200"
+            />
+          </label>
+          <p>Travel time must be greater than 0 ms.</p>
+          <label>
+            Global offset (ms)
+            <input
+              id="global-offset"
+              aria-label="Global offset (ms)"
+              type="number"
+              value="0"
+            />
+          </label>
+        </fieldset>
+        <div>
+          <button id="btn-start" type="button">Start</button>
+          <button id="btn-stop" type="button">Stop</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Chart editor</h2>
+        <label>
+          Left lane timings (ms)
+          <textarea id="left-timings" aria-label="Left lane timings (ms)"></textarea>
+        </label>
+        <label>
+          Right lane timings (ms)
+          <textarea id="right-timings" aria-label="Right lane timings (ms)"></textarea>
+        </label>
+        <button id="btn-save" type="button">Save chart</button>
+        <p>Chart status: <span id="chart-status">idle</span></p>
+      </section>
+
+      <canvas
+        id="visualizer"
+        width="420"
+        height="140"
+        aria-label="session visualizer"
+      ></canvas>
+    </main>
+    <script src="app.js"></script>
   </body>
 </html>
