@@ -1,5 +1,6 @@
 from rhythm_jump.engine.session import GameSession, Mode, State
 from rhythm_jump.headless import run_headless_loop, run_headless_step, should_start, trigger_start_if_needed
+from rhythm_jump.main import is_headless_mode_enabled, run_headless_polling_step
 
 
 def test_should_start_when_contact_pressed_in_headless_mode() -> None:
@@ -60,3 +61,22 @@ def test_run_headless_loop_returns_false_when_no_start_occurs() -> None:
 
     assert started is False
     assert session.state == State.IDLE
+
+
+def test_run_headless_polling_step_uses_contact_reader() -> None:
+    session = GameSession(mode=Mode.HEADLESS)
+    events = iter([False, True])
+
+    assert run_headless_polling_step(session, lambda: next(events)) is False
+    assert session.state == State.IDLE
+
+    assert run_headless_polling_step(session, lambda: next(events)) is True
+    assert session.state == State.PLAYING
+
+
+def test_is_headless_mode_enabled_from_env(monkeypatch) -> None:
+    monkeypatch.setenv('RHYTHM_HEADLESS_MODE', '1')
+    assert is_headless_mode_enabled() is True
+
+    monkeypatch.setenv('RHYTHM_HEADLESS_MODE', '0')
+    assert is_headless_mode_enabled() is False
