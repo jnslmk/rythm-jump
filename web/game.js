@@ -99,6 +99,7 @@ function updateUI() {
   if (select.options.length <= 1 && state.songs.length > 0) {
     select.innerHTML = '<option value="">Select a song</option>' + 
       state.songs.map(s => `<option value="${s}">${s}</option>`).join('');
+    select.value = state.songs[0];
   }
 }
 
