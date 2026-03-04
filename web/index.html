@@ -8,7 +8,7 @@
   </head>
   <body>
     <nav class="surface center-content flex-gap">
-      <a href="index.html" class="active accent-button">Game</a>
+      <a href="index.html" class="active accent-button" aria-current="page">Game</a>
       <a href="manage.html" class="ghost-button">Manage Songs</a>
     </nav>
     <main>
@@ -16,13 +16,13 @@
       
       <section id="game-status" class="surface">
         <div class="status-grid">
-          <div class="status-item">
+          <div class="status-item surface center-content flex-gap">
             <span class="label">Session:</span>
-            <span id="run-status">Connecting...</span>
+            <span id="run-status" aria-live="polite">Connecting...</span>
           </div>
-          <div class="status-item">
+          <div class="status-item surface center-content flex-gap">
             <span class="label">Last Action:</span>
-            <span id="last-action">None</span>
+            <span id="last-action" aria-live="polite">None</span>
           </div>
         </div>
       </section>

@@ -34,7 +34,9 @@ async function loadSong(songId) {
   document.getElementById('right-timings').value = state.right.join(', ');
   
   document.getElementById('editor-title').textContent = `Editing: ${songId}`;
-  document.getElementById('song-editor').classList.remove('hidden');
+  const editor = document.getElementById('song-editor');
+  editor.classList.remove('hidden');
+  editor.setAttribute('aria-hidden', 'false');
   
   if (wavesurfer) wavesurfer.destroy();
   
@@ -124,7 +126,9 @@ function init() {
     if (e.target.value) {
       loadSong(e.target.value);
     } else {
-      document.getElementById('song-editor').classList.add('hidden');
+      const editor = document.getElementById('song-editor');
+      editor.classList.add('hidden');
+      editor.setAttribute('aria-hidden', 'true');
       if (wavesurfer) {
         wavesurfer.destroy();
         wavesurfer = null;
