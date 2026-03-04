@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from rhythm_jump.engine.session import GameSession, Mode
 
 
@@ -11,3 +13,16 @@ def trigger_start_if_needed(session: GameSession, contact_pressed: bool) -> bool
 
     session.start_from_contact()
     return True
+
+
+def run_headless_step(session: GameSession, contact_pressed: bool) -> bool:
+    return trigger_start_if_needed(session=session, contact_pressed=contact_pressed)
+
+
+def run_headless_loop(session: GameSession, contact_events: Iterable[bool]) -> bool:
+    started = False
+    for contact_pressed in contact_events:
+        if run_headless_step(session=session, contact_pressed=contact_pressed):
+            started = True
+            break
+    return started
