@@ -44,7 +44,7 @@ nav.surface {
 }
 
 nav a {
-  font-family: 'Arcade Gamer', 'Space Grotesk', system-ui, sans-serif;
+  font-family: 'Arcade Classic', 'Arcade Gamer', 'Space Grotesk', system-ui, sans-serif;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   font-size: 0.9rem;
@@ -68,7 +68,7 @@ nav a:hover {
 h1,
 h2,
 legend {
-  font-family: 'Arcade Gamer', 'Space Grotesk', system-ui, sans-serif;
+  font-family: 'Arcade Classic', 'Arcade Gamer', 'Space Grotesk', system-ui, sans-serif;
   letter-spacing: 0.25em;
   text-transform: uppercase;
   margin: 0;
