@@ -2,14 +2,82 @@
   box-sizing: border-box;
 }
 
+:root {
+  --bg-base: #020817;
+  --surface: #0b1226;
+  --edge-glow: rgba(0, 240, 255, 0.25);
+  --glow-primary: #00f0ff;
+  --glow-secondary: #ff3ecf;
+  --glow-tertiary: #3cff9b;
+  --text-main: #e4ecff;
+  --text-muted: #94a3b8;
+}
+
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
   line-height: 1.5;
   margin: 0;
-  padding: 0;
-  background-color: #f8fafc;
-  color: #334155;
+  min-height: 100vh;
+  background: var(--bg-base);
+  color: var(--text-main);
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.04) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* Tron helper atoms */
+.surface {
+  background: var(--surface);
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  box-shadow:
+    0 25px 45px rgba(0, 0, 0, 0.65),
+    0 0 35px 3px var(--edge-glow);
+  position: relative;
+  overflow: hidden;
+}
+.surface::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12), transparent 60%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.flex-gap {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.center-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.full-width {
+  width: 100%;
+}
+.label {
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 nav {
@@ -78,13 +146,6 @@ section {
 .status-item {
   display: flex;
   flex-direction: column;
-}
-
-.label {
-  font-size: 0.875rem;
-  color: #64748b;
-  font-weight: 600;
-  text-transform: uppercase;
 }
 
 .controls, .bpm-actions, .editor-controls {
