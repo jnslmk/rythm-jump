@@ -21,6 +21,11 @@ class GameSession:
         if self.state == State.IDLE:
             self.state = State.PLAYING
 
+    def start_from_contact(self) -> None:
+        if self.mode != Mode.HEADLESS:
+            return
+        self.start()
+
     def on_browser_disconnected(self) -> None:
         if self.state != State.PLAYING:
             return

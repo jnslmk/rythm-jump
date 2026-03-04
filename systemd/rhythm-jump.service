@@ -1,0 +1,13 @@
+[Unit]
+Description=Rhythm Jump Backend Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rhythm-jump/backend
+ExecStart=/usr/bin/env uv run --project /opt/rhythm-jump/backend uvicorn rhythm_jump.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
