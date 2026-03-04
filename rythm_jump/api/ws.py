@@ -2,6 +2,7 @@ import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
+from typing import TypedDict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -35,6 +36,12 @@ def _chart_duration_ms(chart: Chart) -> int:
     return max_hit + chart.travel_time_ms
 
 
+class _ActiveBar(TypedDict):
+    lane: str
+    hit_time_ms: int
+    spawn_ms: int
+
+
 @router.websocket("/ws/session/{session_id}")
 async def session_stream(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
@@ -56,9 +63,38 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
             left_level = 0.0
             right_level = 0.0
             progress_ms = 0
+            travel_time_ms = chart.travel_time_ms
             duration = _chart_duration_ms(chart)
+            left_spawn_idx = 0
+            right_spawn_idx = 0
+            active_bars: list[_ActiveBar] = []
+
+            def spawn_ready_bars(
+                hit_times: list[int], lane: str, current_index: int
+            ) -> int:
+                while current_index < len(hit_times):
+                    hit_time_ms = hit_times[current_index]
+                    spawn_ms = max(hit_time_ms - travel_time_ms, 0)
+                    if progress_ms < spawn_ms:
+                        break
+                    active_bars.append(
+                        {
+                            "lane": lane,
+                            "hit_time_ms": hit_time_ms,
+                            "spawn_ms": spawn_ms,
+                        }
+                    )
+                    current_index += 1
+                return current_index
+
             try:
                 while progress_ms <= duration and session.state == State.PLAYING:
+                    left_spawn_idx = spawn_ready_bars(
+                        chart.left, "left", left_spawn_idx
+                    )
+                    right_spawn_idx = spawn_ready_bars(
+                        chart.right, "right", right_spawn_idx
+                    )
                     while (
                         left_idx < len(chart.left)
                         and progress_ms >= chart.left[left_idx]
@@ -97,6 +133,32 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
                             "levels": [left_level, right_level],
                         }
                     )
+
+                    remaining_ms = max(duration - progress_ms, 0)
+                    next_active_bars: list[_ActiveBar] = []
+                    for bar in active_bars:
+                        progress_since_spawn = progress_ms - bar["spawn_ms"]
+                        if progress_since_spawn < 0:
+                            next_active_bars.append(bar)
+                            continue
+
+                        bar_progress = min(progress_since_spawn, travel_time_ms)
+                        await websocket.send_json(
+                            {
+                                "type": "bar_frame",
+                                "session_id": session_id,
+                                "lane": bar["lane"],
+                                "hit_time_ms": bar["hit_time_ms"],
+                                "travel_time_ms": travel_time_ms,
+                                "progress_ms": bar_progress,
+                                "remaining_ms": remaining_ms,
+                            }
+                        )
+
+                        if progress_since_spawn < travel_time_ms:
+                            next_active_bars.append(bar)
+
+                    active_bars = next_active_bars
 
                     await asyncio.sleep(TICK_INTERVAL_S)
                     progress_ms += int(TICK_INTERVAL_S * 1000)
