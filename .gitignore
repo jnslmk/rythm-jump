@@ -1,1 +1,10 @@
 .worktrees/
+__pycache__/
+*.pyc
+.venv/
+uv.lock
+node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+.pytest_cache/
+.ruff_cache/
