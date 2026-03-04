@@ -5,7 +5,7 @@ from rythm_jump.headless import (
     should_start,
     trigger_start_if_needed,
 )
-from rythm_jump.main import is_headless_mode_enabled, run_headless_polling_step
+from rythm_jump.main import run_headless_polling_step
 
 
 def test_should_start_when_contact_pressed_in_headless_mode() -> None:
@@ -85,11 +85,3 @@ def test_run_headless_polling_step_uses_default_gpio_reader(monkeypatch) -> None
 
     assert run_headless_polling_step(session) is True
     assert session.state == State.PLAYING
-
-
-def test_is_headless_mode_enabled_from_env(monkeypatch) -> None:
-    monkeypatch.setenv("RHYTHM_HEADLESS_MODE", "1")
-    assert is_headless_mode_enabled() is True
-
-    monkeypatch.setenv("RHYTHM_HEADLESS_MODE", "0")
-    assert is_headless_mode_enabled() is False

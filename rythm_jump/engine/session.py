@@ -26,8 +26,8 @@ class GameSession:
             return
         self.start()
 
-    def on_browser_disconnected(self) -> None:
-        if self.state != State.PLAYING:
-            return
-        if self.mode == Mode.BROWSER_ATTACHED:
-            self.state = State.ABORTED_DISCONNECTED
+    def handle_input(self, lane: str) -> None:
+        if self.state == State.PLAYING:
+            # Here we would normally trigger scoring/judgement logic.
+            # For now, it's a placeholder.
+            pass

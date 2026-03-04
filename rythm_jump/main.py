@@ -1,5 +1,4 @@
 import asyncio
-import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -19,23 +18,21 @@ FRONTEND_DIR = Path(__file__).parent.parent / "web"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.headless_task = None
-    app.state.headless_session = None
-
-    if is_headless_mode_enabled():
-        session = GameSession(mode=Mode.HEADLESS)
-        app.state.headless_session = session
-        app.state.headless_task = asyncio.create_task(_headless_polling_worker(session))
+    # Always have one global session
+    session = GameSession(mode=Mode.HEADLESS)
+    app.state.session = session
+    app.state.polling_task = asyncio.create_task(_headless_polling_worker(session))
 
     yield
 
-    task = getattr(app.state, "headless_task", None)
+    task = getattr(app.state, "polling_task", None)
     if task is not None:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
 
-    app.state.headless_task = None
+    app.state.polling_task = None
+    app.state.session = None
 
 
 app = FastAPI(title="Rhythm Jump Backend", lifespan=lifespan)
@@ -47,8 +44,7 @@ if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
 
 
-def is_headless_mode_enabled() -> bool:
-    return os.getenv("RHYTHM_HEADLESS_MODE") == "1"
+# Headless polling loop is always enabled to allow hardware inputs to trigger the session.
 
 
 def run_headless_polling_step(

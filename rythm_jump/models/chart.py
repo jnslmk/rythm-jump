@@ -14,6 +14,7 @@ class JudgementWindowsMs(BaseModel):
 
 class Chart(BaseModel):
     song_id: str
+    bpm: float = 120.0
     travel_time_ms: PositiveInt
     # Signed to allow calibration shifts where charts need early/late global timing offsets.
     global_offset_ms: int
@@ -21,8 +22,4 @@ class Chart(BaseModel):
     left: list[NonNegativeInt]
     right: list[NonNegativeInt]
 
-    @model_validator(mode="after")
-    def validate_lanes_not_both_empty(self) -> "Chart":
-        if not self.left and not self.right:
-            raise ValueError("left and right lanes cannot both be empty")
-        return self
+    # Removed lane validation as new songs might start empty.

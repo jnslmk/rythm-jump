@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rhythm Jump - Management</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- WaveSurfer for waveform visualizer -->
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+  </head>
+  <body>
+    <nav>
+      <a href="index.html">Game</a>
+      <a href="manage.html" class="active">Manage Songs</a>
+    </nav>
+    <main>
+      <h1>Song Management</h1>
+      
+      <section id="upload-song">
+        <h2>Add New Song</h2>
+        <form id="upload-form">
+          <label>
+            Song ID (slug)
+            <input id="new-song-id" type="text" placeholder="my-awesome-song" required />
+          </label>
+          <label>
+            Audio File
+            <input id="new-song-audio" type="file" accept="audio/*" required />
+          </label>
+          <button type="submit">Upload</button>
+          <span id="upload-status"></span>
+        </form>
+      </section>
+
+      <section id="edit-song">
+        <h2>Select Song to Edit</h2>
+        <div class="controls">
+          <select id="song-edit-select" aria-label="Select Song to Edit">
+            <option value="">Loading songs...</option>
+          </select>
+        </div>
+      </section>
+
+      <section id="song-editor" class="hidden">
+        <h2 id="editor-title">Editing</h2>
+        
+        <div id="waveform-container">
+          <div id="waveform"></div>
+          <div id="timeline"></div>
+        </div>
+        
+        <div class="editor-controls">
+          <button id="btn-play-pause">Play / Pause</button>
+          <button id="btn-stop-audio" class="secondary">Stop</button>
+          <span id="audio-time">0:00 / 0:00</span>
+        </div>
+
+        <div class="bpm-controls">
+          <fieldset>
+            <legend>BPM & Timing</legend>
+            <label>
+              BPM
+              <input id="song-bpm" type="number" step="0.1" value="120" />
+            </label>
+            <label>
+              Global Offset (ms)
+              <input id="global-offset" type="number" value="0" />
+            </label>
+            <div class="bpm-actions">
+              <button id="btn-tap-bpm" type="button">Tap BPM</button>
+              <button id="btn-analyze-bpm" type="button" class="secondary">Analyze BPM (placeholder)</button>
+            </div>
+          </fieldset>
+          
+          <div class="manual-timings">
+            <label>
+              Left Timings (ms)
+              <textarea id="left-timings" placeholder="1000, 2000, ..."></textarea>
+            </label>
+            <label>
+              Right Timings (ms)
+              <textarea id="right-timings" placeholder="1500, 2500, ..."></textarea>
+            </label>
+            <button id="btn-save-chart">Save Chart</button>
+            <span id="save-status"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="manage.js"></script>
+  </body>
+</html>

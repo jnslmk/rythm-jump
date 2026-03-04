@@ -10,6 +10,7 @@ from rythm_jump.main import app
 def _chart_payload(song_id: str) -> dict[str, object]:
     return {
         "song_id": song_id,
+        "bpm": 120.0,
         "travel_time_ms": 1200,
         "global_offset_ms": 0,
         "judgement_windows_ms": {"perfect": 50, "good": 100},

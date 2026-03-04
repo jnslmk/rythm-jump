@@ -40,15 +40,6 @@ def test_load_chart_accepts_independent_lanes() -> None:
     assert chart.right == [1500, 2500]
 
 
-def test_load_chart_rejects_both_lanes_empty(tmp_path: Path) -> None:
-    payload = _base_chart_payload()
-    payload["left"] = []
-    payload["right"] = []
-
-    with pytest.raises(ValidationError):
-        load_chart(_write_chart(tmp_path, payload))
-
-
 @pytest.mark.parametrize(
     ("field_name", "field_value"),
     [
