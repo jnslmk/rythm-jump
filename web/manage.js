@@ -8,8 +8,174 @@ let state = {
   bpm: 120,
   offset: 0,
   left: [],
-  right: []
+  right: [],
+  beats: [],
+  beatIntervalMs: 500,
+  beatSelections: {
+    left: new Set(),
+    right: new Set()
+  }
 };
+
+function buildBeatTimeline(duration, bpm, offsetSeconds) {
+  const beatInterval = 60 / bpm;
+  const beats = [];
+  const startIndex = Math.ceil(-offsetSeconds / beatInterval);
+  let safety = 0;
+
+  for (let i = startIndex; ; i++) {
+    if (safety++ > 6000) break;
+    const time = offsetSeconds + (i * beatInterval);
+    if (time > duration) break;
+    if (time < 0) continue;
+
+    beats.push({
+      index: i,
+      time,
+      timeMs: Math.max(0, Math.round(time * 1000)),
+      isBar: ((i % 4) + 4) % 4 === 0
+    });
+  }
+
+  return { beats, beatInterval };
+}
+
+function findClosestBeatIndex(timeMs, toleranceMs) {
+  if (!state.beats.length) return -1;
+
+  let bestIdx = -1;
+  let bestDiff = Infinity;
+  for (let i = 0; i < state.beats.length; i++) {
+    const diff = Math.abs(state.beats[i].timeMs - timeMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    } else if (state.beats[i].timeMs > timeMs && diff > bestDiff) {
+      break;
+    }
+  }
+
+  return bestDiff <= toleranceMs ? bestIdx : -1;
+}
+
+function buildBeatSelectionSets() {
+  const sets = {
+    left: new Set(),
+    right: new Set()
+  };
+
+  if (!state.beats.length) {
+    state.beatSelections = sets;
+    return sets;
+  }
+
+  const toleranceMs = Math.max((state.beatIntervalMs || 0) * 0.25, 30);
+
+  for (const lane of ['left', 'right']) {
+    const quantized = [];
+    for (const timing of state[lane]) {
+      const idx = findClosestBeatIndex(timing, toleranceMs);
+      if (idx >= 0) {
+        sets[lane].add(idx);
+        quantized.push(state.beats[idx].timeMs);
+      }
+    }
+    state[lane] = Array.from(new Set(quantized)).sort((a, b) => a - b);
+  }
+
+  state.beatSelections = sets;
+  return sets;
+}
+
+function renderBeatGrid() {
+  const beatGrid = document.getElementById('beat-grid');
+  if (!beatGrid) return;
+
+  beatGrid.innerHTML = '';
+
+  if (!state.beats.length) {
+    beatGrid.innerHTML = '<p class="beat-grid-empty">Beat grid will appear after a song loads.</p>';
+    state.beatSelections = {
+      left: new Set(),
+      right: new Set()
+    };
+    return;
+  }
+
+  const selections = buildBeatSelectionSets();
+  const fragment = document.createDocumentFragment();
+
+  state.beats.forEach((beat, index) => {
+    const column = document.createElement('div');
+    column.className = beat.isBar ? 'beat-column bar' : 'beat-column';
+    column.dataset.beatIndex = String(index);
+
+    const indexLabel = document.createElement('span');
+    indexLabel.className = 'beat-index';
+    indexLabel.textContent = String(index + 1);
+
+    const timeLabel = document.createElement('span');
+    timeLabel.className = 'beat-time';
+    timeLabel.textContent = `${beat.timeMs}ms`;
+
+    const leftBtn = document.createElement('button');
+    leftBtn.type = 'button';
+    leftBtn.className = 'beat-cell';
+    leftBtn.dataset.beatIndex = String(index);
+    leftBtn.dataset.lane = 'left';
+    leftBtn.textContent = 'L';
+    leftBtn.setAttribute('title', `Left note at ${beat.timeMs} ms`);
+    leftBtn.setAttribute('aria-pressed', selections.left.has(index));
+    if (selections.left.has(index)) leftBtn.classList.add('active');
+
+    const rightBtn = document.createElement('button');
+    rightBtn.type = 'button';
+    rightBtn.className = 'beat-cell';
+    rightBtn.dataset.beatIndex = String(index);
+    rightBtn.dataset.lane = 'right';
+    rightBtn.textContent = 'R';
+    rightBtn.setAttribute('title', `Right note at ${beat.timeMs} ms`);
+    rightBtn.setAttribute('aria-pressed', selections.right.has(index));
+    if (selections.right.has(index)) rightBtn.classList.add('active');
+
+    column.appendChild(indexLabel);
+    column.appendChild(timeLabel);
+    column.appendChild(leftBtn);
+    column.appendChild(rightBtn);
+    fragment.appendChild(column);
+  });
+
+  beatGrid.appendChild(fragment);
+}
+
+function handleBeatGridClick(event) {
+  const button = event.target.closest('button[data-lane]');
+  if (!button) return;
+
+  const lane = button.dataset.lane;
+  const beatIndex = Number(button.dataset.beatIndex);
+  toggleBeatSelection(beatIndex, lane);
+}
+
+function toggleBeatSelection(beatIndex, lane) {
+  if (!state.beats[beatIndex]) return;
+
+  const laneArray = state[lane];
+  const beatMs = state.beats[beatIndex].timeMs;
+  const currentlySelected = state.beatSelections?.[lane]?.has(beatIndex) ?? false;
+
+  if (currentlySelected) {
+    const removeIdx = laneArray.findIndex((value) => Math.abs(value - beatMs) < 2);
+    if (removeIdx >= 0) {
+      laneArray.splice(removeIdx, 1);
+    }
+  } else {
+    laneArray.push(beatMs);
+    laneArray.sort((a, b) => a - b);
+  }
+
+  renderBeatGrid();
+}
 
 async function fetchSongs() {
   const response = await fetch(`${apiBaseUrl}/songs`);
@@ -26,13 +192,18 @@ async function loadSong(songId) {
   
   state.bpm = chart.bpm || 120; // Default if not in chart
   state.offset = chart.global_offset_ms || 0;
-  state.left = chart.left || [];
-  state.right = chart.right || [];
+  state.left = (chart.left || []).slice().sort((a, b) => a - b);
+  state.right = (chart.right || []).slice().sort((a, b) => a - b);
+  state.beats = [];
+  state.beatIntervalMs = 500;
+  state.beatSelections = {
+    left: new Set(),
+    right: new Set()
+  };
+  renderBeatGrid();
   
   document.getElementById('song-bpm').value = state.bpm;
   document.getElementById('global-offset').value = state.offset;
-  document.getElementById('left-timings').value = state.left.join(', ');
-  document.getElementById('right-timings').value = state.right.join(', ');
   
   document.getElementById('editor-title').textContent = `Editing: ${songId}`;
   const editor = document.getElementById('song-editor');
@@ -77,42 +248,42 @@ async function loadSong(songId) {
 }
 
 function updateBeatGrid() {
-  if (!wavesurfer || !wsRegions) return;
-  
+  if (!wavesurfer || !wsRegions) {
+    state.beats = [];
+    state.beatIntervalMs = 0;
+    renderBeatGrid();
+    return;
+  }
+
   wsRegions.clearRegions();
-  
+
   const bpm = parseFloat(document.getElementById('song-bpm').value) || 120;
   const offsetMs = parseFloat(document.getElementById('global-offset').value) || 0;
   const offset = offsetMs / 1000;
   const duration = wavesurfer.getDuration();
-  
-  if (bpm <= 0 || !duration) return;
-  
-  const beatInterval = 60 / bpm;
-  
-  // High-precision loop: multiply index to avoid accumulation drift
-  // Start index: first i such that offset + i*beatInterval >= 0
-  const startI = Math.ceil(-offset / beatInterval);
-  
-  for (let i = startI; ; i++) {
-    const t = offset + (i * beatInterval);
-    if (t > duration) break;
-    
-    // Safety break to prevent infinite loops (max 10 minutes of song)
-    if (i > 5000) break;
 
-    const isBar = (i % 4 === 0);
-    
+  if (bpm <= 0 || !duration) {
+    state.beats = [];
+    state.beatIntervalMs = 0;
+    renderBeatGrid();
+    return;
+  }
+
+  const { beats, beatInterval } = buildBeatTimeline(duration, bpm, offset);
+  state.beats = beats;
+  state.beatIntervalMs = beatInterval * 1000;
+  renderBeatGrid();
+
+  beats.forEach((beat) => {
     wsRegions.addRegion({
-      start: t,
-      end: t + 0.01, // Minimal width, rely on border for visibility
-      color: isBar ? '#f6d03f' : 'rgba(255, 255, 255, 0.4)',
+      start: beat.time,
+      end: beat.time + 0.01,
+      color: beat.isBar ? '#f6d03f' : 'rgba(255, 255, 255, 0.4)',
       drag: false,
       resize: false,
-      // Some WaveSurfer versions use 'label' or 'content' or specific data attributes
-      content: isBar ? 'BAR' : ''
+      content: beat.isBar ? 'BAR' : ''
     });
-  }
+  });
 }
 
 async function analyzeBpm() {
@@ -206,8 +377,8 @@ async function saveChart() {
     travel_time_ms: 1200, // Should probably be configurable per song
     global_offset_ms: parseInt(document.getElementById('global-offset').value, 10),
     judgement_windows_ms: { perfect: 50, good: 100 },
-    left: parseTimings(document.getElementById('left-timings').value),
-    right: parseTimings(document.getElementById('right-timings').value),
+    left: [...state.left],
+    right: [...state.right],
     bpm: parseFloat(document.getElementById('song-bpm').value)
   };
   
@@ -229,10 +400,6 @@ async function saveChart() {
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
   }
-}
-
-function parseTimings(text) {
-  return text.split(',').map(s => s.trim()).filter(s => s.length > 0).map(Number).filter(n => !isNaN(n));
 }
 
 function init() {
@@ -298,9 +465,11 @@ function init() {
   
   document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
+  document.getElementById('beat-grid').addEventListener('click', handleBeatGridClick);
   
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
   
+  renderBeatGrid();
   fetchSongs();
 }
 
