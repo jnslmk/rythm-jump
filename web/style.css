@@ -266,6 +266,27 @@ textarea {
   font-family: 'IBM Plex Mono', monospace;
 }
 
+/* Ensure regions are visible as sharp lines */
+.wavesurfer-region {
+  border-left: 2px solid currentColor !important;
+  width: 0 !important;
+  opacity: 1 !important;
+  z-index: 10 !important;
+  pointer-events: none;
+}
+
+.wavesurfer-region:after {
+  content: attr(data-region-label);
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 4px #000;
+  white-space: nowrap;
+}
+
 #save-status,
 #upload-status {
   font-weight: 600;

@@ -1,6 +1,7 @@
 const apiBaseUrl = '/api';
 
 let wavesurfer = null;
+let wsRegions = null;
 let currentSongId = '';
 let state = {
   songs: [],
@@ -51,6 +52,18 @@ async function loadSong(songId) {
     url: `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`
   });
   
+  // WaveSurfer 7 Plugin access varies by load method; check common locations
+  const Timeline = window.TimelinePlugin || WaveSurfer.Timeline || (WaveSurfer.plugins && WaveSurfer.plugins.Timeline);
+  const Regions = window.RegionsPlugin || WaveSurfer.Regions || (WaveSurfer.plugins && WaveSurfer.plugins.Regions);
+
+  if (Timeline) {
+    wavesurfer.registerPlugin(Timeline.create({ container: '#timeline' }));
+  }
+  
+  if (Regions) {
+    wsRegions = wavesurfer.registerPlugin(Regions.create());
+  }
+  
   wavesurfer.on('audioprocess', (time) => {
     document.getElementById('audio-time').textContent = 
       `${formatTime(time)} / ${formatTime(wavesurfer.getDuration())}`;
@@ -59,7 +72,108 @@ async function loadSong(songId) {
   wavesurfer.on('ready', () => {
     document.getElementById('audio-time').textContent = 
       `0:00 / ${formatTime(wavesurfer.getDuration())}`;
+    updateBeatGrid();
   });
+}
+
+function updateBeatGrid() {
+  if (!wavesurfer || !wsRegions) return;
+  
+  wsRegions.clearRegions();
+  
+  const bpm = parseFloat(document.getElementById('song-bpm').value) || 120;
+  const offsetMs = parseFloat(document.getElementById('global-offset').value) || 0;
+  const offset = offsetMs / 1000;
+  const duration = wavesurfer.getDuration();
+  
+  if (bpm <= 0 || !duration) return;
+  
+  const beatInterval = 60 / bpm;
+  
+  // High-precision loop: multiply index to avoid accumulation drift
+  // Start index: first i such that offset + i*beatInterval >= 0
+  const startI = Math.ceil(-offset / beatInterval);
+  
+  for (let i = startI; ; i++) {
+    const t = offset + (i * beatInterval);
+    if (t > duration) break;
+    
+    // Safety break to prevent infinite loops (max 10 minutes of song)
+    if (i > 5000) break;
+
+    const isBar = (i % 4 === 0);
+    
+    wsRegions.addRegion({
+      start: t,
+      end: t + 0.01, // Minimal width, rely on border for visibility
+      color: isBar ? '#f6d03f' : 'rgba(255, 255, 255, 0.4)',
+      drag: false,
+      resize: false,
+      // Some WaveSurfer versions use 'label' or 'content' or specific data attributes
+      content: isBar ? 'BAR' : ''
+    });
+  }
+}
+
+async function analyzeBpm() {
+  if (!wavesurfer) return;
+  const decodedData = wavesurfer.getDecodedData();
+  if (!decodedData) return;
+
+  const status = document.getElementById('save-status');
+  status.textContent = 'Analyzing...';
+
+  try {
+    const data = decodedData.getChannelData(0);
+    const sampleRate = decodedData.sampleRate;
+    
+    // Very basic beat detection: find peaks in volume
+    const step = Math.floor(sampleRate * 0.05); // 50ms windows
+    const peaks = [];
+    const threshold = 0.5;
+    
+    for (let i = 0; i < data.length; i += step) {
+      let max = 0;
+      for (let j = 0; j < step && i + j < data.length; j++) {
+        const val = Math.abs(data[i + j]);
+        if (val > max) max = val;
+      }
+      if (max > threshold) {
+        peaks.push(i / sampleRate);
+      }
+    }
+
+    if (peaks.length < 2) {
+      status.textContent = 'Could not detect BPM';
+      return;
+    }
+
+    // Find common intervals
+    const intervals = [];
+    for (let i = 1; i < peaks.length; i++) {
+      intervals.push(peaks[i] - peaks[i-1]);
+    }
+    
+    // Sort and find median-ish interval
+    intervals.sort((a, b) => a - b);
+    const medianInterval = intervals[Math.floor(intervals.length / 2)];
+    let bpm = 60 / medianInterval;
+    
+    // Normalize to reasonable range (60-180)
+    while (bpm < 60) bpm *= 2;
+    while (bpm > 180) bpm /= 2;
+    
+    bpm = Math.round(bpm * 10) / 10;
+    
+    document.getElementById('song-bpm').value = bpm;
+    state.bpm = bpm;
+    updateBeatGrid();
+    status.textContent = 'BPM detected: ' + bpm;
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch (e) {
+    console.error(e);
+    status.textContent = 'Analysis failed';
+  }
 }
 
 function formatTime(seconds) {
@@ -175,7 +289,15 @@ function init() {
     if (wavesurfer) wavesurfer.stop();
   });
   
-  document.getElementById('btn-tap-bpm').addEventListener('click', tapBpm);
+  document.getElementById('btn-tap-bpm').addEventListener('click', () => {
+    tapBpm();
+    updateBeatGrid();
+  });
+  
+  document.getElementById('btn-analyze-bpm').addEventListener('click', analyzeBpm);
+  
+  document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
+  document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
   
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
   
