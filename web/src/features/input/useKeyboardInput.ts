@@ -24,12 +24,19 @@ export function shouldIgnoreKeyboardTarget(target: EventTarget | null): boolean 
     return false;
   }
 
+  const interactiveSelector =
+    'input, textarea, select, button, a, [role="button"], [role="link"]';
+
   const tagName = target.tagName.toLowerCase();
   if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
     return true;
   }
 
-  if (target.closest('input, textarea, select') !== null) {
+  if (tagName === 'button' || tagName === 'a') {
+    return true;
+  }
+
+  if (target.closest(interactiveSelector) !== null) {
     return true;
   }
 
