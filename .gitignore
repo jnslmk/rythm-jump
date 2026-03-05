@@ -7,3 +7,6 @@ uv.lock
 .ruff_cache/
 node_modules/
 package-lock.json
+
+# Ignore processed songs
+songs/
