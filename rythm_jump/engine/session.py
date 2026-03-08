@@ -1,11 +1,6 @@
 from enum import StrEnum
 
 
-class Mode(StrEnum):
-    BROWSER_ATTACHED = "browser_attached"
-    HEADLESS = "headless"
-
-
 class State(StrEnum):
     IDLE = "idle"
     PLAYING = "playing"
@@ -13,8 +8,7 @@ class State(StrEnum):
 
 
 class GameSession:
-    def __init__(self, mode: Mode) -> None:
-        self.mode = mode
+    def __init__(self) -> None:
         self.state = State.IDLE
 
     def start(self) -> None:
@@ -22,8 +16,6 @@ class GameSession:
             self.state = State.PLAYING
 
     def start_from_contact(self) -> None:
-        if self.mode != Mode.HEADLESS:
-            return
         self.start()
 
     def handle_input(self, lane: str) -> None:

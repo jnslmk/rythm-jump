@@ -1,14 +1,14 @@
 from collections.abc import Iterable
 
-from rythm_jump.engine.session import GameSession, Mode, State
+from rythm_jump.engine.session import GameSession, State
 
 
-def should_start(contact_pressed: bool, mode: Mode) -> bool:
-    return contact_pressed and mode == Mode.HEADLESS
+def should_start(contact_pressed: bool) -> bool:
+    return contact_pressed
 
 
 def trigger_start_if_needed(session: GameSession, contact_pressed: bool) -> bool:
-    if not should_start(contact_pressed=contact_pressed, mode=session.mode):
+    if not should_start(contact_pressed=contact_pressed):
         return False
 
     previous_state = session.state

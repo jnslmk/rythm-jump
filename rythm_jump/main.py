@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from rythm_jump.api.charts import router as charts_router
 from rythm_jump.api.http import router as api_router
 from rythm_jump.api.ws import router as ws_router
-from rythm_jump.engine.session import GameSession, Mode
+from rythm_jump.engine.session import GameSession
 from rythm_jump.headless import run_headless_step
 from rythm_jump.hw.gpio_input import read_contact_pressed
 
@@ -19,7 +19,7 @@ FRONTEND_DIR = Path(__file__).parent.parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Always have one global session
-    session = GameSession(mode=Mode.HEADLESS)
+    session = GameSession()
     app.state.session = session
     app.state.polling_task = asyncio.create_task(_headless_polling_worker(session))
 
