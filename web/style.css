@@ -447,6 +447,12 @@ textarea {
   display: none;
 }
 
+.debug-toggle-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin: 1.5rem 0 0;
+}
+
 .debug-header {
   display: flex;
   justify-content: space-between;
