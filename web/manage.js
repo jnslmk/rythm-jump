@@ -522,7 +522,9 @@ function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
   ctx.fillRect(0, 0, width, height);
 
   const descriptors = state.audioAnalysis?.beat_descriptors;
-  const beatTimesMs = state.audioAnalysis?.beat_times_ms;
+  const beatTimesMs = state.beats.length
+    ? state.beats.map((beat) => beat.timeMs)
+    : (state.audioAnalysis?.beat_times_ms || []);
   const showBeatMarkers = options.showBeatMarkers !== false;
   const showDescriptors = options.showDescriptors !== false;
   const durationMs = resolveManageWaveformDurationMs();
