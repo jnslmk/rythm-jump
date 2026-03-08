@@ -1,3 +1,5 @@
+import rythm_jump.compat as compat  # ensure old stdlib APIs stay available
+
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
@@ -12,6 +14,9 @@ from rythm_jump.api.ws import router as ws_router
 from rythm_jump.engine.session import GameSession
 from rythm_jump.headless import run_headless_step
 from rythm_jump.hw.gpio_input import read_contact_pressed
+
+
+del compat
 
 FRONTEND_DIR = Path(__file__).parent.parent / "web"
 
