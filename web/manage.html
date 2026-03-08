@@ -66,6 +66,11 @@
               height="88"
               aria-label="Colored spectral waveform"
             ></canvas>
+            <div class="zoom-beat-grid-wrap">
+              <div id="zoom-beat-grid" class="zoom-beat-grid" role="grid" aria-label="1/2 beat grid for note placement">
+                <p class="beat-grid-empty">Beat grid will appear after a song loads.</p>
+              </div>
+            </div>
           </div>
           <div class="overview-waveform-wrap">
             <canvas
@@ -102,16 +107,9 @@
             </div>
           </fieldset>
           <div class="beat-grid-panel">
-            <div class="beat-grid-header">
-              <span class="label">Beat Grid</span>
-              <span class="beat-grid-hint">Click to toggle a left/right node on a beat—only beats can be selected.</span>
-            </div>
             <div class="beat-grid-actions">
               <button id="btn-save-chart" class="accent-button">Save Chart</button>
               <span id="save-status" role="status" aria-live="polite"></span>
-            </div>
-            <div id="beat-grid" class="beat-grid" role="grid" aria-label="Beat grid for note placement">
-              <p class="beat-grid-empty">Beat grid will appear after a song loads.</p>
             </div>
           </div>
         </div>

@@ -2,8 +2,8 @@ const apiBaseUrl = '/api';
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
 const MIN_SPECTRAL_RMS = 0.001;
 const WAVEFORM_ZOOM_MIN = 1;
-const WAVEFORM_ZOOM_STEP = 0.25;
 const MAX_VISIBLE_BEATS = 16;
+const SUBDIVISIONS_PER_BEAT = 2;
 const WAVEFORM_BAND_LAYERS = [
   { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 }, // lows
   { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 }, // mids
@@ -29,7 +29,9 @@ let state = {
   spectralRmsMax: 1,
   waveformZoom: 1,
   beats: [],
+  subdivisions: [],
   beatIntervalMs: 500,
+  subdivisionIntervalMs: 250,
   beatSelections: {
     left: new Set(),
     right: new Set()
@@ -38,38 +40,58 @@ let state = {
 
 function buildBeatTimeline(duration, bpm, offsetSeconds) {
   const beatInterval = 60 / bpm;
+  const subdivisionInterval = beatInterval / SUBDIVISIONS_PER_BEAT;
   const beats = [];
-  const startIndex = Math.ceil(-offsetSeconds / beatInterval);
+  const subdivisions = [];
+  const startSubdivisionIndex = Math.ceil(-offsetSeconds / subdivisionInterval);
   let safety = 0;
 
-  for (let i = startIndex; ; i++) {
-    if (safety++ > 6000) break;
-    const time = offsetSeconds + (i * beatInterval);
+  for (let i = startSubdivisionIndex; ; i++) {
+    if (safety++ > 60000) break;
+    const time = offsetSeconds + (i * subdivisionInterval);
     if (time > duration) break;
     if (time < 0) continue;
 
-    beats.push({
+    const subdivisionInBeat = ((i % SUBDIVISIONS_PER_BEAT) + SUBDIVISIONS_PER_BEAT) % SUBDIVISIONS_PER_BEAT;
+    const beatIndex = Math.floor(i / SUBDIVISIONS_PER_BEAT);
+    const slot = {
       index: i,
       time,
       timeMs: Math.max(0, Math.round(time * 1000)),
-      isBar: ((i % 4) + 4) % 4 === 0
-    });
+      subdivisionInBeat,
+      beatIndex,
+      isBeatStart: subdivisionInBeat === 0
+    };
+    subdivisions.push(slot);
+    if (slot.isBeatStart) {
+      beats.push({
+        index: beatIndex,
+        time,
+        timeMs: slot.timeMs,
+        isBar: ((beatIndex % 4) + 4) % 4 === 0
+      });
+    }
   }
 
-  return { beats, beatInterval };
+  return {
+    beats,
+    subdivisions,
+    beatInterval,
+    subdivisionInterval
+  };
 }
 
-function findClosestBeatIndex(timeMs, toleranceMs) {
-  if (!state.beats.length) return -1;
+function findClosestSubdivisionIndex(timeMs, toleranceMs) {
+  if (!state.subdivisions.length) return -1;
 
   let bestIdx = -1;
   let bestDiff = Infinity;
-  for (let i = 0; i < state.beats.length; i++) {
-    const diff = Math.abs(state.beats[i].timeMs - timeMs);
+  for (let i = 0; i < state.subdivisions.length; i++) {
+    const diff = Math.abs(state.subdivisions[i].timeMs - timeMs);
     if (diff < bestDiff) {
       bestDiff = diff;
       bestIdx = i;
-    } else if (state.beats[i].timeMs > timeMs && diff > bestDiff) {
+    } else if (state.subdivisions[i].timeMs > timeMs && diff > bestDiff) {
       break;
     }
   }
@@ -83,20 +105,20 @@ function buildBeatSelectionSets() {
     right: new Set()
   };
 
-  if (!state.beats.length) {
+  if (!state.subdivisions.length) {
     state.beatSelections = sets;
     return sets;
   }
 
-  const toleranceMs = Math.max((state.beatIntervalMs || 0) * 0.25, 30);
+  const toleranceMs = Math.max((state.subdivisionIntervalMs || 0) * 0.45, 20);
 
   for (const lane of ['left', 'right']) {
     const quantized = [];
     for (const timing of state[lane]) {
-      const idx = findClosestBeatIndex(timing, toleranceMs);
+      const idx = findClosestSubdivisionIndex(timing, toleranceMs);
       if (idx >= 0) {
         sets[lane].add(idx);
-        quantized.push(state.beats[idx].timeMs);
+        quantized.push(state.subdivisions[idx].timeMs);
       }
     }
     state[lane] = Array.from(new Set(quantized)).sort((a, b) => a - b);
@@ -107,12 +129,13 @@ function buildBeatSelectionSets() {
 }
 
 function renderBeatGrid() {
-  const beatGrid = document.getElementById('beat-grid');
+  const beatGrid = document.getElementById('zoom-beat-grid');
   if (!beatGrid) return;
 
   beatGrid.innerHTML = '';
+  beatGrid.style.gridTemplateColumns = '1fr';
 
-  if (!state.beats.length) {
+  if (!state.subdivisions.length) {
     beatGrid.innerHTML = '<p class="beat-grid-empty">Beat grid will appear after a song loads.</p>';
     state.beatSelections = {
       left: new Set(),
@@ -123,19 +146,31 @@ function renderBeatGrid() {
 
   const selections = buildBeatSelectionSets();
   const fragment = document.createDocumentFragment();
+  const durationMs = Math.max(resolveManageWaveformDurationMs(), 1);
+  const subdivisionMs = Math.max(state.subdivisionIntervalMs || 0, 1);
+  const firstSubdivisionMs = state.subdivisions[0]?.timeMs || 0;
+  const lastSubdivisionMs = state.subdivisions[state.subdivisions.length - 1]?.timeMs || 0;
+  const tailMs = Math.max(durationMs - (lastSubdivisionMs + subdivisionMs), 0);
+  const leadUnits = Math.max(firstSubdivisionMs / subdivisionMs, 0);
+  const tailUnits = Math.max(tailMs / subdivisionMs, 0);
+  const startTrack = leadUnits > 0.0001 ? `minmax(0, ${leadUnits}fr) ` : '';
+  const endTrack = tailUnits > 0.0001 ? ` minmax(0, ${tailUnits}fr)` : '';
+  beatGrid.style.gridTemplateColumns = `${startTrack}repeat(${state.subdivisions.length}, minmax(0, 1fr))${endTrack}`;
 
-  state.beats.forEach((beat, index) => {
+  if (leadUnits > 0.0001) {
+    const leadSpacer = document.createElement('div');
+    leadSpacer.className = 'beat-grid-spacer';
+    leadSpacer.setAttribute('aria-hidden', 'true');
+    fragment.appendChild(leadSpacer);
+  }
+
+  state.subdivisions.forEach((slot, index) => {
     const column = document.createElement('div');
-    column.className = beat.isBar ? 'beat-column bar' : 'beat-column';
+    column.className = slot.isBeatStart ? 'beat-column beat-start' : 'beat-column';
+    if (slot.isBeatStart && ((slot.beatIndex % 4) + 4) % 4 === 0) {
+      column.classList.add('bar');
+    }
     column.dataset.beatIndex = String(index);
-
-    const indexLabel = document.createElement('span');
-    indexLabel.className = 'beat-index';
-    indexLabel.textContent = String(index + 1);
-
-    const timeLabel = document.createElement('span');
-    timeLabel.className = 'beat-time';
-    timeLabel.textContent = `${beat.timeMs}ms`;
 
     const leftBtn = document.createElement('button');
     leftBtn.type = 'button';
@@ -143,7 +178,7 @@ function renderBeatGrid() {
     leftBtn.dataset.beatIndex = String(index);
     leftBtn.dataset.lane = 'left';
     leftBtn.textContent = 'L';
-    leftBtn.setAttribute('title', `Left note at ${beat.timeMs} ms`);
+    leftBtn.setAttribute('title', `Left note at ${slot.timeMs} ms`);
     leftBtn.setAttribute('aria-pressed', selections.left.has(index));
     if (selections.left.has(index)) leftBtn.classList.add('active');
 
@@ -153,16 +188,21 @@ function renderBeatGrid() {
     rightBtn.dataset.beatIndex = String(index);
     rightBtn.dataset.lane = 'right';
     rightBtn.textContent = 'R';
-    rightBtn.setAttribute('title', `Right note at ${beat.timeMs} ms`);
+    rightBtn.setAttribute('title', `Right note at ${slot.timeMs} ms`);
     rightBtn.setAttribute('aria-pressed', selections.right.has(index));
     if (selections.right.has(index)) rightBtn.classList.add('active');
 
-    column.appendChild(indexLabel);
-    column.appendChild(timeLabel);
     column.appendChild(leftBtn);
     column.appendChild(rightBtn);
     fragment.appendChild(column);
   });
+
+  if (tailUnits > 0.0001) {
+    const tailSpacer = document.createElement('div');
+    tailSpacer.className = 'beat-grid-spacer';
+    tailSpacer.setAttribute('aria-hidden', 'true');
+    fragment.appendChild(tailSpacer);
+  }
 
   beatGrid.appendChild(fragment);
 }
@@ -177,10 +217,10 @@ function handleBeatGridClick(event) {
 }
 
 function toggleBeatSelection(beatIndex, lane) {
-  if (!state.beats[beatIndex]) return;
+  if (!state.subdivisions[beatIndex]) return;
 
   const laneArray = state[lane];
-  const beatMs = state.beats[beatIndex].timeMs;
+  const beatMs = state.subdivisions[beatIndex].timeMs;
   const currentlySelected = state.beatSelections?.[lane]?.has(beatIndex) ?? false;
 
   if (currentlySelected) {
@@ -211,32 +251,6 @@ function resolveManageWaveformDurationMs() {
   return 1;
 }
 
-function drawSpectralTimeAxis(ctx, width, height, durationMs) {
-  const axisY = height - 16;
-  const labelY = height - 4;
-  const tickCount = 8;
-
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, axisY);
-  ctx.lineTo(width, axisY);
-  ctx.stroke();
-
-  ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
-  ctx.font = "10px 'Space Grotesk', sans-serif";
-  for (let i = 0; i <= tickCount; i += 1) {
-    const ratio = i / tickCount;
-    const x = ratio * width;
-    const seconds = ((durationMs * ratio) / 1000).toFixed(1);
-    ctx.beginPath();
-    ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + 4);
-    ctx.stroke();
-    ctx.fillText(`${seconds}s`, Math.min(x + 2, width - 26), labelY);
-  }
-}
-
 function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
   if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
     return;
@@ -251,6 +265,19 @@ function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
     ctx.moveTo(x, 2);
     ctx.lineTo(x, axisY);
     ctx.stroke();
+  }
+}
+
+function drawBarBeatLabels(ctx, width, durationMs) {
+  const barBeats = state.beats.filter((beat) => beat.isBar);
+  if (!barBeats.length) {
+    return;
+  }
+  ctx.fillStyle = 'rgba(248, 250, 252, 0.9)';
+  ctx.font = "10px 'Space Grotesk', sans-serif";
+  for (const barBeat of barBeats) {
+    const x = Math.max(0, Math.min((barBeat.timeMs / durationMs) * width, width - 1));
+    ctx.fillText(String(barBeat.index + 1), Math.min(x + 3, width - 16), 12);
   }
 }
 
@@ -321,19 +348,24 @@ function getMaxWaveformZoom() {
 }
 
 function clampWaveformZoom(zoom) {
-  const normalizedZoom = Number.isFinite(zoom) ? zoom : WAVEFORM_ZOOM_MIN;
-  return Math.min(getMaxWaveformZoom(), Math.max(WAVEFORM_ZOOM_MIN, normalizedZoom));
+  void zoom;
+  return getMaxWaveformZoom();
 }
 
 function applyWaveformZoom() {
   const spectralWaveform = document.getElementById('manage-spectral-waveform');
+  const beatGrid = document.getElementById('zoom-beat-grid');
   if (!spectralWaveform) {
     return;
   }
 
   const zoom = clampWaveformZoom(state.waveformZoom);
   state.waveformZoom = zoom;
-  spectralWaveform.style.width = `${Math.max(zoom * 100, 100)}%`;
+  const widthPercent = `${Math.max(zoom * 100, 100)}%`;
+  spectralWaveform.style.width = widthPercent;
+  if (beatGrid) {
+    beatGrid.style.width = widthPercent;
+  }
 
   // WaveSurfer zoom is in pixels/second and 0 is fully zoomed out.
   if (wavesurfer?.zoom) {
@@ -341,30 +373,6 @@ function applyWaveformZoom() {
   }
 
   renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
-}
-
-function handleWaveformWheel(event) {
-  if (!currentSongId) {
-    return;
-  }
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-    ? event.deltaX
-    : (event.shiftKey ? event.deltaY : 0);
-  if (scrollContainer && horizontalDelta !== 0) {
-    event.preventDefault();
-    scrollContainer.scrollLeft += horizontalDelta;
-    return;
-  }
-
-  if (event.deltaY === 0) {
-    return;
-  }
-
-  event.preventDefault();
-  const direction = event.deltaY < 0 ? 1 : -1;
-  state.waveformZoom = clampWaveformZoom(state.waveformZoom + (direction * WAVEFORM_ZOOM_STEP));
-  applyWaveformZoom();
 }
 
 function startWaveformDrag(event) {
@@ -528,13 +536,14 @@ function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
   const showBeatMarkers = options.showBeatMarkers !== false;
   const showDescriptors = options.showDescriptors !== false;
   const durationMs = resolveManageWaveformDurationMs();
-  const axisY = height - 16;
-  const centerY = (axisY - 2) / 2;
+  const axisY = height - 2;
+  const centerY = axisY / 2;
   const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
   const hasDetailedWaveform = drawDecodedWaveform(ctx, width, centerY, maxAmplitude);
   const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
   if (showBeatMarkers) {
     drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
+    drawBarBeatLabels(ctx, width, durationMs);
   }
 
   if (showDescriptors && Array.isArray(descriptors) && descriptors.length > 0) {
@@ -581,7 +590,6 @@ function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
   ctx.moveTo(progressX, 0);
   ctx.lineTo(progressX, axisY);
   ctx.stroke();
-  drawSpectralTimeAxis(ctx, width, height, durationMs);
 }
 
 function renderManageSpectralWaveform(progressMs = 0) {
@@ -654,6 +662,8 @@ async function loadSong(songId) {
   }
   state.beats = [];
   state.beatIntervalMs = 500;
+  state.subdivisions = [];
+  state.subdivisionIntervalMs = 250;
   state.beatSelections = {
     left: new Set(),
     right: new Set()
@@ -734,7 +744,9 @@ async function loadSong(songId) {
 function updateBeatGrid() {
   if (!wavesurfer || !wsRegions) {
     state.beats = [];
+    state.subdivisions = [];
     state.beatIntervalMs = 0;
+    state.subdivisionIntervalMs = 0;
     renderBeatGrid();
     return;
   }
@@ -748,14 +760,18 @@ function updateBeatGrid() {
 
   if (bpm <= 0 || !duration) {
     state.beats = [];
+    state.subdivisions = [];
     state.beatIntervalMs = 0;
+    state.subdivisionIntervalMs = 0;
     renderBeatGrid();
     return;
   }
 
-  const { beats, beatInterval } = buildBeatTimeline(duration, bpm, offset);
+  const { beats, subdivisions, beatInterval, subdivisionInterval } = buildBeatTimeline(duration, bpm, offset);
   state.beats = beats;
+  state.subdivisions = subdivisions;
   state.beatIntervalMs = beatInterval * 1000;
+  state.subdivisionIntervalMs = subdivisionInterval * 1000;
   state.waveformZoom = clampWaveformZoom(state.waveformZoom);
   applyWaveformZoom();
   renderBeatGrid();
@@ -991,9 +1007,8 @@ function init() {
   
   document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
-  document.getElementById('beat-grid').addEventListener('click', handleBeatGridClick);
+  document.getElementById('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
   const waveformScroll = document.getElementById('spectral-waveform-scroll');
-  waveformScroll.addEventListener('wheel', handleWaveformWheel, { passive: false });
   waveformScroll.addEventListener('scroll', () => {
     renderManageOverviewWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
   });
