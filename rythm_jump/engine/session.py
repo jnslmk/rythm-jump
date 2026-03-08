@@ -8,7 +8,6 @@ class State(StrEnum):
 
     IDLE = "idle"
     PLAYING = "playing"
-    ABORTED_DISCONNECTED = "aborted_disconnected"
 
 
 class GameSession:
