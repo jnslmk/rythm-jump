@@ -1,6 +1,15 @@
 """Pydantic models that describe Rhythm Jump charts."""
 
-from pydantic import BaseModel, NonNegativeInt, PositiveInt, model_validator
+from typing import Literal
+
+from pydantic import (
+    BaseModel,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    model_validator,
+)
 
 
 class JudgementWindowsMs(BaseModel):
@@ -18,6 +27,40 @@ class JudgementWindowsMs(BaseModel):
         return self
 
 
+class SpectralBandEnergy(BaseModel):
+    """Normalized energy split across low/mid/high frequency ranges."""
+
+    low: NonNegativeFloat
+    mid: NonNegativeFloat
+    high: NonNegativeFloat
+
+
+class BeatSpectralDescriptor(BaseModel):
+    """Per-beat spectral annotation used by the chart editor and game UI."""
+
+    time_ms: NonNegativeInt
+    onset_strength: NonNegativeFloat
+    spectral_centroid_hz: NonNegativeFloat
+    spectral_bandwidth_hz: NonNegativeFloat
+    spectral_rolloff_hz: NonNegativeFloat
+    rms: NonNegativeFloat
+    band_energy: SpectralBandEnergy
+    dominant_band: Literal["low", "mid", "high"]
+    color_hint: str
+
+
+class AudioAnalysis(BaseModel):
+    """Offline audio analysis metadata derived from librosa."""
+
+    version: str = "librosa-v1"
+    sample_rate_hz: PositiveInt
+    hop_length: PositiveInt
+    frame_length_ms: PositiveInt
+    tempo_bpm: PositiveFloat
+    beat_times_ms: list[NonNegativeInt]
+    beat_descriptors: list[BeatSpectralDescriptor]
+
+
 class Chart(BaseModel):
     """Describe a Rhythm Jump chart and its timing data."""
 
@@ -29,3 +72,4 @@ class Chart(BaseModel):
     judgement_windows_ms: JudgementWindowsMs
     left: list[NonNegativeInt]
     right: list[NonNegativeInt]
+    audio_analysis: AudioAnalysis | None = None

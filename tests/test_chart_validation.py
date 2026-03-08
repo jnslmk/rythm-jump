@@ -10,6 +10,7 @@ TRAVEL_TIME_MS = 1200
 PERFECT_WINDOW_MS = 50
 GOOD_WINDOW_MS = 100
 NEGATIVE_GLOBAL_OFFSET_MS = -120
+DETECTED_BPM = 128.0
 DEFAULT_LEFT = [1000, 2000, 3000]
 DEFAULT_RIGHT = [1500, 2500]
 
@@ -109,3 +110,34 @@ def test_load_chart_accepts_negative_global_offset(tmp_path: Path) -> None:
     chart = load_chart(_write_chart(tmp_path, payload))
 
     assert chart.global_offset_ms == NEGATIVE_GLOBAL_OFFSET_MS
+
+
+def test_load_chart_accepts_audio_analysis_metadata(tmp_path: Path) -> None:
+    payload = _base_chart_payload()
+    payload["audio_analysis"] = {
+        "version": "librosa-v1",
+        "sample_rate_hz": 22050,
+        "hop_length": 512,
+        "frame_length_ms": 23,
+        "tempo_bpm": DETECTED_BPM,
+        "beat_times_ms": [500, 1000],
+        "beat_descriptors": [
+            {
+                "time_ms": 500,
+                "onset_strength": 0.32,
+                "spectral_centroid_hz": 710.0,
+                "spectral_bandwidth_hz": 920.0,
+                "spectral_rolloff_hz": 2050.0,
+                "rms": 0.42,
+                "band_energy": {"low": 0.4, "mid": 0.5, "high": 0.1},
+                "dominant_band": "mid",
+                "color_hint": "#2dd4bf",
+            },
+        ],
+    }
+
+    chart = load_chart(_write_chart(tmp_path, payload))
+
+    assert chart.audio_analysis is not None
+    assert chart.audio_analysis.tempo_bpm == DETECTED_BPM
+    assert chart.audio_analysis.beat_descriptors[0].dominant_band == "mid"

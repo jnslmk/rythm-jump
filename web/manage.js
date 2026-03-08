@@ -1,5 +1,6 @@
 const apiBaseUrl = '/api';
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
+const MIN_SPECTRAL_RMS = 0.001;
 
 let wavesurfer = null;
 let wsRegions = null;
@@ -10,6 +11,9 @@ let state = {
   offset: 0,
   left: [],
   right: [],
+  audioAnalysis: null,
+  chartDurationMs: 1,
+  spectralRmsMax: 1,
   beats: [],
   beatIntervalMs: 500,
   beatSelections: {
@@ -178,6 +182,120 @@ function toggleBeatSelection(beatIndex, lane) {
   renderBeatGrid();
 }
 
+function resolveManageWaveformDurationMs() {
+  const waveDurationMs = (wavesurfer?.getDuration?.() || 0) * 1000;
+  if (Number.isFinite(waveDurationMs) && waveDurationMs > 0) {
+    return waveDurationMs;
+  }
+  if (state.chartDurationMs > 0) {
+    return state.chartDurationMs;
+  }
+  const descriptors = state.audioAnalysis?.beat_descriptors;
+  if (Array.isArray(descriptors) && descriptors.length > 0) {
+    return Math.max(...descriptors.map((descriptor) => Number(descriptor.time_ms) || 0), 1);
+  }
+  return 1;
+}
+
+function drawSpectralTimeAxis(ctx, width, height, durationMs) {
+  const axisY = height - 16;
+  const labelY = height - 4;
+  const tickCount = 8;
+
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, axisY);
+  ctx.lineTo(width, axisY);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
+  ctx.font = "10px 'Space Grotesk', sans-serif";
+  for (let i = 0; i <= tickCount; i += 1) {
+    const ratio = i / tickCount;
+    const x = ratio * width;
+    const seconds = ((durationMs * ratio) / 1000).toFixed(1);
+    ctx.beginPath();
+    ctx.moveTo(x, axisY);
+    ctx.lineTo(x, axisY + 4);
+    ctx.stroke();
+    ctx.fillText(`${seconds}s`, Math.min(x + 2, width - 26), labelY);
+  }
+}
+
+function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
+  if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
+    return;
+  }
+  for (let i = 0; i < beatTimesMs.length; i += 1) {
+    const beatMs = Number(beatTimesMs[i]) || 0;
+    const x = (beatMs / durationMs) * width;
+    const isBarStart = i % 4 === 0;
+    ctx.strokeStyle = isBarStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
+    ctx.lineWidth = isBarStart ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x, 2);
+    ctx.lineTo(x, axisY);
+    ctx.stroke();
+  }
+}
+
+function renderManageSpectralWaveform(progressMs = 0) {
+  const canvas = document.getElementById('manage-spectral-waveform');
+  if (!canvas) {
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+  const width = Math.max(canvas.clientWidth, 1);
+  const height = Math.max(canvas.clientHeight, 1);
+  canvas.width = width;
+  canvas.height = height;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, width, height);
+
+  const descriptors = state.audioAnalysis?.beat_descriptors;
+  const beatTimesMs = state.audioAnalysis?.beat_times_ms;
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
+    ctx.font = "12px 'Space Grotesk', sans-serif";
+    ctx.fillText('Run Analyze Song to render a colored waveform.', 16, 24);
+    return;
+  }
+
+  const durationMs = resolveManageWaveformDurationMs();
+  const axisY = height - 16;
+  const centerY = (axisY - 2) / 2;
+  const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
+  const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
+  drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
+
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  for (const descriptor of descriptors) {
+    const timeMs = Number(descriptor.time_ms) || 0;
+    const x = (timeMs / durationMs) * width;
+    const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
+    ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
+    ctx.globalAlpha = 0.82;
+    ctx.beginPath();
+    ctx.moveTo(x, centerY - amplitude);
+    ctx.lineTo(x, centerY + amplitude);
+    ctx.stroke();
+  }
+
+  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#f8fafc';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(progressX, 0);
+  ctx.lineTo(progressX, axisY);
+  ctx.stroke();
+  drawSpectralTimeAxis(ctx, width, height, durationMs);
+}
+
 async function fetchSongs() {
   const response = await fetch(`${apiBaseUrl}/songs`);
   state.songs = await response.json();
@@ -205,6 +323,19 @@ async function loadSong(songId) {
   state.offset = chart.global_offset_ms || 0;
   state.left = (chart.left || []).slice().sort((a, b) => a - b);
   state.right = (chart.right || []).slice().sort((a, b) => a - b);
+  state.audioAnalysis = chart.audio_analysis || null;
+  const leftMax = state.left.length ? Math.max(...state.left) : 0;
+  const rightMax = state.right.length ? Math.max(...state.right) : 0;
+  state.chartDurationMs = Math.max(leftMax, rightMax) + 1200;
+  const descriptors = state.audioAnalysis?.beat_descriptors;
+  if (Array.isArray(descriptors) && descriptors.length > 0) {
+    state.spectralRmsMax = Math.max(
+      ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
+      MIN_SPECTRAL_RMS
+    );
+  } else {
+    state.spectralRmsMax = 1;
+  }
   state.beats = [];
   state.beatIntervalMs = 500;
   state.beatSelections = {
@@ -249,6 +380,7 @@ async function loadSong(songId) {
   wavesurfer.on('audioprocess', (time) => {
     document.getElementById('audio-time').textContent = 
       `${formatTime(time)} / ${formatTime(wavesurfer.getDuration())}`;
+    renderManageSpectralWaveform(time * 1000);
   });
   
   wavesurfer.on('ready', () => {
@@ -256,22 +388,26 @@ async function loadSong(songId) {
     document.getElementById('audio-time').textContent = 
       `0:00 / ${formatTime(wavesurfer.getDuration())}`;
     updateBeatGrid();
+    renderManageSpectralWaveform(0);
     updateControlStates();
   });
 
   wavesurfer.on('play', () => {
     isWavePlaying = true;
     updateControlStates();
+    renderManageSpectralWaveform(wavesurfer.getCurrentTime() * 1000);
   });
 
   wavesurfer.on('pause', () => {
     isWavePlaying = false;
     updateControlStates();
+    renderManageSpectralWaveform(wavesurfer.getCurrentTime() * 1000);
   });
 
   wavesurfer.on('finish', () => {
     isWavePlaying = false;
     updateControlStates();
+    renderManageSpectralWaveform(state.chartDurationMs);
   });
 }
 
@@ -314,46 +450,6 @@ function updateBeatGrid() {
   });
 }
 
-async function analyzeBpm() {
-  const status = document.getElementById('save-status');
-  if (!currentSongId) {
-    status.textContent = 'Select a song before analyzing';
-    return;
-  }
-
-  status.textContent = 'Analyzing...';
-  setControlEnabled('btn-analyze-bpm', false);
-
-  try {
-    const response = await fetch(
-      `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/tempo`
-    );
-    if (!response.ok) {
-      const detail = (await response.text()) || response.statusText;
-      throw new Error(detail || 'Analysis failed');
-    }
-
-    const payload = await response.json();
-    const bpm = parseFloat(payload?.bpm);
-    if (!Number.isFinite(bpm) || bpm <= 0) {
-      throw new Error('Tempo not detected');
-    }
-
-    document.getElementById('song-bpm').value = bpm;
-    state.bpm = bpm;
-    updateBeatGrid();
-    status.textContent = 'BPM detected: ' + bpm;
-    setTimeout(() => {
-      status.textContent = '';
-    }, 3000);
-  } catch (e) {
-    console.error(e);
-    status.textContent = e instanceof Error ? e.message : 'Analysis failed';
-  } finally {
-    updateControlStates();
-  }
-}
-
 function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -383,7 +479,7 @@ function updateControlStates() {
 
   setControlEnabled('btn-play-pause', canEdit);
   setControlEnabled('btn-tap-bpm', canEdit);
-  setControlEnabled('btn-analyze-bpm', hasSong);
+  setControlEnabled('btn-analyze-audio', hasSong);
   setControlEnabled('btn-save-chart', hasSong);
   updatePlayPauseButtonLabel();
 }
@@ -413,7 +509,8 @@ async function saveChart() {
     judgement_windows_ms: { perfect: 50, good: 100 },
     left: [...state.left],
     right: [...state.right],
-    bpm: parseFloat(document.getElementById('song-bpm').value)
+    bpm: parseFloat(document.getElementById('song-bpm').value),
+    audio_analysis: state.audioAnalysis
   };
   
   const status = document.getElementById('save-status');
@@ -439,6 +536,66 @@ async function saveChart() {
   }
 }
 
+async function analyzeAudioMetadata() {
+  const status = document.getElementById('save-status');
+  if (!currentSongId) {
+    status.textContent = 'Select a song before analyzing';
+    return;
+  }
+
+  status.textContent = 'Analyzing audio features...';
+  setControlEnabled('btn-analyze-audio', false);
+
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/analysis`,
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      const detail = (await response.text()) || response.statusText;
+      throw new Error(detail || 'Audio analysis failed');
+    }
+
+    const payload = await response.json();
+    state.audioAnalysis = payload.analysis || null;
+    const analyzedOffset = Number(payload?.global_offset_ms);
+    if (Number.isFinite(analyzedOffset)) {
+      state.offset = Math.round(analyzedOffset);
+      document.getElementById('global-offset').value = String(state.offset);
+    }
+    const descriptors = state.audioAnalysis?.beat_descriptors;
+    if (Array.isArray(descriptors) && descriptors.length > 0) {
+      state.spectralRmsMax = Math.max(
+        ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
+        MIN_SPECTRAL_RMS
+      );
+    } else {
+      state.spectralRmsMax = 1;
+    }
+    let didUpdateBeatGrid = false;
+    const bpm = parseFloat(payload?.bpm);
+    if (Number.isFinite(bpm) && bpm > 0) {
+      state.bpm = bpm;
+      document.getElementById('song-bpm').value = String(bpm);
+      updateBeatGrid();
+      didUpdateBeatGrid = true;
+    }
+    if (!didUpdateBeatGrid && Number.isFinite(analyzedOffset)) {
+      updateBeatGrid();
+    }
+    status.textContent = 'Tempo and spectral analysis saved';
+    renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+    setTimeout(() => {
+      status.textContent = '';
+    }, 3000);
+  } catch (e) {
+    console.error(e);
+    status.textContent = e instanceof Error ? e.message : 'Audio analysis failed';
+  } finally {
+    updateControlStates();
+  }
+}
+
 function init() {
   document.getElementById('song-edit-select').addEventListener('change', (e) => {
     if (e.target.value) {
@@ -451,10 +608,13 @@ function init() {
       editor.setAttribute('aria-hidden', 'true');
       currentSongId = '';
       isWavePlaying = false;
+      state.audioAnalysis = null;
+      state.spectralRmsMax = 1;
       if (wavesurfer) {
         wavesurfer.destroy();
         wavesurfer = null;
       }
+      renderManageSpectralWaveform(0);
       updateControlStates();
     }
   });
@@ -503,15 +663,19 @@ function init() {
     updateBeatGrid();
   });
   
-  document.getElementById('btn-analyze-bpm').addEventListener('click', analyzeBpm);
+  document.getElementById('btn-analyze-audio').addEventListener('click', analyzeAudioMetadata);
   
   document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
   document.getElementById('beat-grid').addEventListener('click', handleBeatGridClick);
   
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
+  window.addEventListener('resize', () => {
+    renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+  });
   
   renderBeatGrid();
+  renderManageSpectralWaveform(0);
   updateControlStates();
   fetchSongs();
 }

@@ -51,7 +51,24 @@
         <h2>Waveform</h2>
         <div id="waveform-container">
           <div id="waveform"></div>
+          <canvas
+            id="game-spectral-waveform"
+            class="spectral-waveform"
+            width="960"
+            height="88"
+            aria-label="Colored spectral waveform"
+          ></canvas>
           <div id="game-timeline"></div>
+        </div>
+        <div class="controls spectral-controls">
+          <label for="spectral-mode-select">
+            <span class="label">Spectral View</span>
+            <select id="spectral-mode-select" class="input-control">
+              <option value="precomputed">Precomputed Metadata</option>
+              <option value="live">Live FFT</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
         </div>
         <p class="hint">Waveform preview of the currently selected song.</p>
       </section>

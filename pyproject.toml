@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn>=0.41.0",
     "python-multipart>=0.0.22",
     "websockets>=16.0",
-    "madmom>=0.16.1",
+    "librosa>=0.11.0",
     "setuptools>=82.0.0",
 ]
 
@@ -34,9 +34,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["rythm_jump"]
 
-[tool.uv.extra-build-dependencies]
-madmom = ["Cython", "numpy"]
-
 [tool.ty.environment]
 python-version = "3.12"
 
@@ -56,7 +53,3 @@ per-file-ignores = { "tests/*.py" = ["S101", "D100", "D103"] }
 
 
 [tool.pytest.ini_options]
-filterwarnings = [
-    "ignore::DeprecationWarning:madmom\\.ml\\.nn\\.activations",
-    "ignore::DeprecationWarning:madmom\\.features\\.onsets",
-]

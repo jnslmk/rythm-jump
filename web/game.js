@@ -2,7 +2,9 @@ const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
 const CLOCK_DECAY = 0.85;
 const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
+const SPECTRAL_MODE_STORAGE_KEY = 'rhythmJumpSpectralMode';
 const MAX_TIMELINE_ENTRIES = 12;
+const MIN_SPECTRAL_RMS = 0.001;
 
 const KEY_MAPPING = {
   a: 'left',
@@ -20,6 +22,14 @@ function loadDebugVisibility() {
   return stored === 'true';
 }
 
+function loadSpectralMode() {
+  const stored = localStorage.getItem(SPECTRAL_MODE_STORAGE_KEY);
+  if (stored === 'live' || stored === 'off') {
+    return stored;
+  }
+  return 'precomputed';
+}
+
 let state = {
   songId: '',
   runStatus: 'idle',
@@ -33,11 +43,17 @@ let state = {
   sessionProgressMs: 0,
   chart: null,
   chartDurationMs: 0,
+  spectralMode: loadSpectralMode(),
+  spectralRmsMax: 1,
   debugVisible: loadDebugVisibility(),
   sessionStartMs: null,
 };
 
 let gameWaveSurfer = null;
+let analyzerContext = null;
+let analyzerNode = null;
+let analyzerData = null;
+let audioSourceNode = null;
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
@@ -59,10 +75,48 @@ function updateControlStates() {
   }
 }
 
+function updateSpectralModeSelector() {
+  const select = document.getElementById('spectral-mode-select');
+  if (!select) return;
+  select.value = state.spectralMode;
+}
+
+function setSpectralMode(mode) {
+  const supported = ['precomputed', 'live', 'off'];
+  if (!supported.includes(mode)) {
+    return;
+  }
+  state.spectralMode = mode;
+  localStorage.setItem(SPECTRAL_MODE_STORAGE_KEY, mode);
+  updateSpectralModeSelector();
+  renderGameSpectralWaveform();
+}
+
 function stopAudioPlayback() {
   const audio = ensureAudioElement();
   audio.pause();
   audio.currentTime = 0;
+}
+
+function ensureLiveAnalyzer(audio) {
+  if (typeof window.AudioContext === 'undefined' && typeof window.webkitAudioContext === 'undefined') {
+    return;
+  }
+  if (!analyzerContext) {
+    const ContextCtor = window.AudioContext || window.webkitAudioContext;
+    analyzerContext = new ContextCtor();
+    analyzerNode = analyzerContext.createAnalyser();
+    analyzerNode.fftSize = 512;
+    analyzerNode.smoothingTimeConstant = 0.8;
+  }
+  if (!audioSourceNode) {
+    audioSourceNode = analyzerContext.createMediaElementSource(audio);
+    audioSourceNode.connect(analyzerNode);
+    analyzerNode.connect(analyzerContext.destination);
+  }
+  if (!analyzerData || analyzerData.length !== analyzerNode.frequencyBinCount) {
+    analyzerData = new Uint8Array(analyzerNode.frequencyBinCount);
+  }
 }
 
 function requestStopSession(clearScreen) {
@@ -102,6 +156,12 @@ function initGameWaveform() {
   }
 
   gameWaveSurfer = WaveSurfer.create(config);
+  gameWaveSurfer.on('ready', () => {
+    renderGameSpectralWaveform();
+  });
+  gameWaveSurfer.on('audioprocess', () => {
+    renderGameSpectralWaveform();
+  });
 }
 
 function loadGameWaveform(songId) {
@@ -110,6 +170,7 @@ function loadGameWaveform(songId) {
   if (!gameWaveSurfer) return;
   const url = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
   gameWaveSurfer.load(url);
+  renderGameSpectralWaveform(0);
 }
 
 function formatMs(value) {
@@ -126,6 +187,120 @@ function computeChartDuration(chart) {
   const leftMax = chart.left.length > 0 ? Math.max(...chart.left) : 0;
   const rightMax = chart.right.length > 0 ? Math.max(...chart.right) : 0;
   return Math.max(leftMax, rightMax) + chart.travel_time_ms;
+}
+
+function resolveWaveformDurationMs() {
+  const waveDurationMs = (gameWaveSurfer?.getDuration?.() || 0) * 1000;
+  if (Number.isFinite(waveDurationMs) && waveDurationMs > 0) {
+    return waveDurationMs;
+  }
+  if (state.chartDurationMs > 0) {
+    return state.chartDurationMs;
+  }
+  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
+  if (Array.isArray(descriptors) && descriptors.length > 0) {
+    return Math.max(...descriptors.map((descriptor) => Number(descriptor.time_ms) || 0), 1);
+  }
+  return 1;
+}
+
+function drawSpectralTimeAxis(ctx, width, height, durationMs) {
+  const axisY = height - 16;
+  const labelY = height - 4;
+  const tickCount = 8;
+
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, axisY);
+  ctx.lineTo(width, axisY);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
+  ctx.font = "10px 'Space Grotesk', sans-serif";
+  for (let i = 0; i <= tickCount; i += 1) {
+    const ratio = i / tickCount;
+    const x = ratio * width;
+    const seconds = ((durationMs * ratio) / 1000).toFixed(1);
+    ctx.beginPath();
+    ctx.moveTo(x, axisY);
+    ctx.lineTo(x, axisY + 4);
+    ctx.stroke();
+    ctx.fillText(`${seconds}s`, Math.min(x + 2, width - 26), labelY);
+  }
+}
+
+function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
+  if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
+    return;
+  }
+  for (let i = 0; i < beatTimesMs.length; i += 1) {
+    const beatMs = Number(beatTimesMs[i]) || 0;
+    const x = (beatMs / durationMs) * width;
+    const isBarStart = i % 4 === 0;
+    ctx.strokeStyle = isBarStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
+    ctx.lineWidth = isBarStart ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x, 2);
+    ctx.lineTo(x, axisY);
+    ctx.stroke();
+  }
+}
+
+function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
+  const canvas = document.getElementById('game-spectral-waveform');
+  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
+  const beatTimesMs = state.chart?.audio_analysis?.beat_times_ms;
+  if (!canvas) {
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+  const width = Math.max(canvas.clientWidth, 1);
+  const height = Math.max(canvas.clientHeight, 1);
+  canvas.width = width;
+  canvas.height = height;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, width, height);
+
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
+    ctx.font = "12px 'Space Grotesk', sans-serif";
+    ctx.fillText('Run Analyze Song in Manage Songs to generate colors.', 16, 24);
+    return;
+  }
+
+  const durationMs = resolveWaveformDurationMs();
+  const axisY = height - 16;
+  const centerY = (axisY - 2) / 2;
+  const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
+  const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
+  drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
+
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  for (const descriptor of descriptors) {
+    const timeMs = Number(descriptor.time_ms) || 0;
+    const x = (timeMs / durationMs) * width;
+    const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
+    ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x, centerY - amplitude);
+    ctx.lineTo(x, centerY + amplitude);
+    ctx.stroke();
+  }
+
+  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#f8fafc';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(progressX, 0);
+  ctx.lineTo(progressX, axisY);
+  ctx.stroke();
+  drawSpectralTimeAxis(ctx, width, height, durationMs);
 }
 
 function pushTimelineEntry(timeline, lane, entry) {
@@ -173,6 +348,56 @@ function reduceStreamLevels(levels, event) {
   return levels;
 }
 
+function renderPrecomputedSpectralOverlay(ctx, width, overlayHeight) {
+  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
+  if (!Array.isArray(descriptors) || descriptors.length === 0 || state.chartDurationMs <= 0) {
+    return;
+  }
+
+  const progressMs = state.sessionProgressMs || 0;
+  const rmsMax = state.spectralRmsMax || 1;
+  for (const descriptor of descriptors) {
+    const x = 10 + ((descriptor.time_ms || 0) / state.chartDurationMs) * (width - 20);
+    const rmsRatio = Math.max(0, Math.min((descriptor.rms || 0) / rmsMax, 1));
+    const height = 2 + rmsRatio * (overlayHeight - 4);
+    const ageMs = Math.abs(progressMs - (descriptor.time_ms || 0));
+    const emphasis = ageMs < 160 ? 1 : 0.55;
+    ctx.fillStyle = descriptor.color_hint || '#2dd4bf';
+    ctx.globalAlpha = emphasis;
+    ctx.fillRect(x, overlayHeight - height, 2, height);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function renderLiveSpectralOverlay(ctx, width, overlayHeight) {
+  if (!analyzerNode || !analyzerData) {
+    return;
+  }
+  analyzerNode.getByteFrequencyData(analyzerData);
+  const barWidth = Math.max(width / analyzerData.length, 1);
+  for (let i = 0; i < analyzerData.length; i += 1) {
+    const level = analyzerData[i] / 255;
+    const hue = Math.round((i / analyzerData.length) * 330);
+    const alpha = Math.max(level, 0.15);
+    ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
+    const x = i * barWidth;
+    const barHeight = Math.max(level * overlayHeight, 1);
+    ctx.fillRect(x, overlayHeight - barHeight, Math.ceil(barWidth), barHeight);
+  }
+}
+
+function renderSpectralOverlay(ctx, width, height) {
+  if (state.spectralMode === 'off') {
+    return;
+  }
+  const overlayHeight = Math.min(30, Math.max(16, Math.round(height * 0.4)));
+  if (state.spectralMode === 'live') {
+    renderLiveSpectralOverlay(ctx, width, overlayHeight);
+    return;
+  }
+  renderPrecomputedSpectralOverlay(ctx, width, overlayHeight);
+}
+
 function renderVisualizer() {
   const canvas = document.getElementById('visualizer');
   if (!canvas) return;
@@ -188,6 +413,7 @@ function renderVisualizer() {
   // Background
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, width, height);
+  renderSpectralOverlay(ctx, width, height);
 
   // LED Strip Representation
   const numLeds = 70;
@@ -216,6 +442,7 @@ function renderVisualizer() {
   }
 
   renderBars(ctx, width, height, ledY, ledHeight, centerX);
+  renderGameSpectralWaveform();
 }
 
 function renderBars(ctx, canvasWidth, canvasHeight, ledY, ledHeight, centerX) {
@@ -468,8 +695,18 @@ async function loadChart(songId) {
     const chartData = await response.json();
     state.chart = chartData;
     state.chartDurationMs = computeChartDuration(chartData);
+    const descriptors = chartData?.audio_analysis?.beat_descriptors;
+    if (Array.isArray(descriptors) && descriptors.length > 0) {
+      state.spectralRmsMax = Math.max(
+        ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
+        MIN_SPECTRAL_RMS
+      );
+    } else {
+      state.spectralRmsMax = 1;
+    }
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
+    renderGameSpectralWaveform(0);
     renderDebugPanel();
   } catch (error) {
     console.error('Failed to load chart:', error);
@@ -511,6 +748,12 @@ function ensureAudioElement() {
 
 async function startAudioPlayback(songId) {
   const audio = ensureAudioElement();
+  if (state.spectralMode === 'live') {
+    ensureLiveAnalyzer(audio);
+    if (analyzerContext?.state === 'suspended') {
+      await analyzerContext.resume();
+    }
+  }
   audio.pause();
   audio.currentTime = 0;
   audio.src = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
@@ -586,11 +829,22 @@ function init() {
     setDebugVisibility(!state.debugVisible);
   });
 
+  const spectralModeSelect = document.getElementById('spectral-mode-select');
+  if (spectralModeSelect) {
+    spectralModeSelect.addEventListener('change', (event) => {
+      setSpectralMode(event.target.value);
+    });
+  }
+
   setDebugVisibility(state.debugVisible);
+  updateSpectralModeSelector();
   renderDebugPanel();
   initGameWaveform();
 
     window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('resize', () => {
+      renderGameSpectralWaveform();
+    });
   
   fetchSongs();
   connectWebSocket();

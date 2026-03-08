@@ -169,6 +169,10 @@ h2 {
   align-items: center;
 }
 
+.spectral-controls label {
+  min-width: 220px;
+}
+
 .bpm-controls {
   display: flex;
   flex-direction: column;
@@ -428,6 +432,19 @@ textarea {
   border-radius: 1rem;
   border: 1px solid var(--border);
   padding: 0.75rem;
+}
+
+#waveform {
+  display: none;
+}
+
+.spectral-waveform {
+  width: 100%;
+  height: 88px;
+  margin: 0.5rem 0 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.95));
 }
 
 #audio-time {
