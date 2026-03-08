@@ -1,6 +1,9 @@
 const apiBaseUrl = '/api';
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
 const MIN_SPECTRAL_RMS = 0.001;
+const WAVEFORM_ZOOM_MIN = 1;
+const WAVEFORM_ZOOM_STEP = 0.25;
+const MAX_VISIBLE_BEATS = 16;
 
 let wavesurfer = null;
 let wsRegions = null;
@@ -14,6 +17,7 @@ let state = {
   audioAnalysis: null,
   chartDurationMs: 1,
   spectralRmsMax: 1,
+  waveformZoom: 1,
   beats: [],
   beatIntervalMs: 500,
   beatSelections: {
@@ -240,11 +244,100 @@ function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
   }
 }
 
+function drawDecodedWaveform(ctx, width, centerY, maxAmplitude) {
+  const decodedData = wavesurfer?.getDecodedData?.();
+  if (!decodedData || typeof decodedData.getChannelData !== 'function') {
+    return false;
+  }
+
+  const channel = decodedData.getChannelData(0);
+  if (!channel || !channel.length) {
+    return false;
+  }
+
+  const sampleCount = channel.length;
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+
+  for (let x = 0; x < width; x += 1) {
+    const start = Math.floor((x / width) * sampleCount);
+    let end = Math.floor(((x + 1) / width) * sampleCount);
+    if (end <= start) {
+      end = start + 1;
+    }
+
+    let min = 1;
+    let max = -1;
+    for (let i = start; i < end && i < sampleCount; i += 1) {
+      const sample = channel[i];
+      if (sample < min) min = sample;
+      if (sample > max) max = sample;
+    }
+
+    const top = Math.max(0, centerY + (min * maxAmplitude));
+    const bottom = Math.min((centerY * 2), centerY + (max * maxAmplitude));
+    const barHeight = Math.max(1, bottom - top);
+    ctx.fillRect(x, top, 1, barHeight);
+  }
+
+  return true;
+}
+
+function getMaxWaveformZoom() {
+  const durationMs = resolveManageWaveformDurationMs();
+  const beatIntervalMs = state.beatIntervalMs > 0
+    ? state.beatIntervalMs
+    : (state.bpm > 0 ? 60000 / state.bpm : 500);
+  const targetVisibleWindowMs = beatIntervalMs * MAX_VISIBLE_BEATS;
+  if (!Number.isFinite(durationMs) || durationMs <= 0 || !Number.isFinite(targetVisibleWindowMs) || targetVisibleWindowMs <= 0) {
+    return WAVEFORM_ZOOM_MIN;
+  }
+  return Math.max(WAVEFORM_ZOOM_MIN, durationMs / targetVisibleWindowMs);
+}
+
+function clampWaveformZoom(zoom) {
+  const normalizedZoom = Number.isFinite(zoom) ? zoom : WAVEFORM_ZOOM_MIN;
+  return Math.min(getMaxWaveformZoom(), Math.max(WAVEFORM_ZOOM_MIN, normalizedZoom));
+}
+
+function applyWaveformZoom() {
+  const spectralWaveform = document.getElementById('manage-spectral-waveform');
+  if (!spectralWaveform) {
+    return;
+  }
+
+  const zoom = clampWaveformZoom(state.waveformZoom);
+  state.waveformZoom = zoom;
+  spectralWaveform.style.width = `${Math.max(zoom * 100, 100)}%`;
+
+  // WaveSurfer zoom is in pixels/second and 0 is fully zoomed out.
+  if (wavesurfer?.zoom) {
+    wavesurfer.zoom(zoom <= 1 ? 0 : Math.round((zoom - 1) * 90));
+  }
+
+  renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+}
+
+function handleWaveformWheel(event) {
+  if (!currentSongId) {
+    return;
+  }
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  state.waveformZoom = clampWaveformZoom(state.waveformZoom + (direction * WAVEFORM_ZOOM_STEP));
+  applyWaveformZoom();
+}
+
 function renderManageSpectralWaveform(progressMs = 0) {
   const canvas = document.getElementById('manage-spectral-waveform');
   if (!canvas) {
     return;
   }
+
+  // Avoid collapsing the draw buffer while the editor section is hidden.
+  if (canvas.clientWidth < 2 || canvas.clientHeight < 2) {
+    return;
+  }
+
   const ctx = canvas.getContext('2d');
   const width = Math.max(canvas.clientWidth, 1);
   const height = Math.max(canvas.clientHeight, 1);
@@ -257,32 +350,34 @@ function renderManageSpectralWaveform(progressMs = 0) {
 
   const descriptors = state.audioAnalysis?.beat_descriptors;
   const beatTimesMs = state.audioAnalysis?.beat_times_ms;
-  if (!Array.isArray(descriptors) || descriptors.length === 0) {
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
-    ctx.font = "12px 'Space Grotesk', sans-serif";
-    ctx.fillText('Run Analyze Song to render a colored waveform.', 16, 24);
-    return;
-  }
 
   const durationMs = resolveManageWaveformDurationMs();
   const axisY = height - 16;
   const centerY = (axisY - 2) / 2;
   const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
+  const hasDetailedWaveform = drawDecodedWaveform(ctx, width, centerY, maxAmplitude);
   const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
   drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
 
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  for (const descriptor of descriptors) {
-    const timeMs = Number(descriptor.time_ms) || 0;
-    const x = (timeMs / durationMs) * width;
-    const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
-    ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
-    ctx.globalAlpha = 0.82;
-    ctx.beginPath();
-    ctx.moveTo(x, centerY - amplitude);
-    ctx.lineTo(x, centerY + amplitude);
-    ctx.stroke();
+  if (Array.isArray(descriptors) && descriptors.length > 0) {
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    for (const descriptor of descriptors) {
+      const timeMs = Number(descriptor.time_ms) || 0;
+      const x = (timeMs / durationMs) * width;
+      const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
+      ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
+      ctx.globalAlpha = 0.82;
+      ctx.beginPath();
+      ctx.moveTo(x, centerY - amplitude);
+      ctx.lineTo(x, centerY + amplitude);
+      ctx.stroke();
+    }
+  } else if (!hasDetailedWaveform) {
+    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
+    ctx.font = "12px 'Space Grotesk', sans-serif";
+    ctx.fillText('Run Analyze Song to render a colored waveform.', 16, 24);
+    return;
   }
 
   const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
@@ -294,6 +389,15 @@ function renderManageSpectralWaveform(progressMs = 0) {
   ctx.lineTo(progressX, axisY);
   ctx.stroke();
   drawSpectralTimeAxis(ctx, width, height, durationMs);
+
+  if (isWavePlaying && (state.waveformZoom || 1) > 1) {
+    const scrollContainer = document.getElementById('spectral-waveform-scroll');
+    if (scrollContainer) {
+      const leftTarget = progressX - (scrollContainer.clientWidth * 0.5);
+      const maxLeft = Math.max(scrollContainer.scrollWidth - scrollContainer.clientWidth, 0);
+      scrollContainer.scrollLeft = Math.max(0, Math.min(leftTarget, maxLeft));
+    }
+  }
 }
 
 async function fetchSongs() {
@@ -364,6 +468,9 @@ async function loadSong(songId) {
     height: 128,
     url: `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`
   });
+  requestAnimationFrame(() => {
+    applyWaveformZoom();
+  });
   
   // WaveSurfer 7 Plugin access varies by load method; check common locations
   const Timeline = window.TimelinePlugin || WaveSurfer.Timeline || (WaveSurfer.plugins && WaveSurfer.plugins.Timeline);
@@ -387,6 +494,7 @@ async function loadSong(songId) {
     isWavePlaying = false;
     document.getElementById('audio-time').textContent = 
       `0:00 / ${formatTime(wavesurfer.getDuration())}`;
+    applyWaveformZoom();
     updateBeatGrid();
     renderManageSpectralWaveform(0);
     updateControlStates();
@@ -436,6 +544,8 @@ function updateBeatGrid() {
   const { beats, beatInterval } = buildBeatTimeline(duration, bpm, offset);
   state.beats = beats;
   state.beatIntervalMs = beatInterval * 1000;
+  state.waveformZoom = clampWaveformZoom(state.waveformZoom);
+  applyWaveformZoom();
   renderBeatGrid();
 
   beats.forEach((beat) => {
@@ -668,12 +778,14 @@ function init() {
   document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
   document.getElementById('beat-grid').addEventListener('click', handleBeatGridClick);
+  document.getElementById('spectral-waveform-scroll').addEventListener('wheel', handleWaveformWheel, { passive: false });
   
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
   window.addEventListener('resize', () => {
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
   });
   
+  applyWaveformZoom();
   renderBeatGrid();
   renderManageSpectralWaveform(0);
   updateControlStates();

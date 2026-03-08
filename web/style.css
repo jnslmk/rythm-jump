@@ -176,7 +176,21 @@ h2 {
 .bpm-controls {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.6rem;
+}
+
+.bpm-controls fieldset {
+  margin: 0;
+  padding: 0.65rem 0.8rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.timing-input-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
 }
 
 .beat-grid-panel {
@@ -314,6 +328,10 @@ h2 {
 }
 
 @media (max-width: 640px) {
+  .timing-input-row {
+    grid-template-columns: 1fr;
+  }
+
   .beat-column {
     width: 44px;
   }
@@ -434,17 +452,28 @@ textarea {
   padding: 0.75rem;
 }
 
+#waveform-container .editor-controls {
+  margin-top: 0.5rem;
+}
+
 #waveform {
   display: none;
 }
 
 .spectral-waveform {
+  display: block;
   width: 100%;
+  min-width: 100%;
   height: 88px;
   margin: 0.5rem 0 0.25rem;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.95));
+}
+
+.spectral-waveform-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 #audio-time {
