@@ -3,7 +3,15 @@ from collections import abc as collections_abc
 import json
 import numpy as np
 import re
+import warnings
 from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from madmom.features.beats import RNNBeatProcessor
+from madmom.features.tempo import TempoEstimationProcessor
+from rythm_jump.models.chart import Chart, JudgementWindowsMs
+
 
 if not hasattr(collections, "MutableSequence"):
     collections.MutableSequence = collections_abc.MutableSequence
@@ -14,11 +22,14 @@ if not hasattr(np, "float"):
 if not hasattr(np, "int"):
     setattr(np, "int", int)
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
-from madmom.features.beats import RNNBeatProcessor
-from madmom.features.tempo import TempoEstimationProcessor
-from rythm_jump.models.chart import Chart, JudgementWindowsMs
+visible_deprecation_warning = getattr(
+    np, "VisibleDeprecationWarning", DeprecationWarning
+)
+warnings.filterwarnings(
+    "ignore",
+    category=visible_deprecation_warning,
+    message=r"dtype\(\): align should be passed as Python or NumPy boolean but got `align=0`\..*",
+)
 
 
 router = APIRouter()

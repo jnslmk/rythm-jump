@@ -21,5 +21,3 @@ class Chart(BaseModel):
     judgement_windows_ms: JudgementWindowsMs
     left: list[NonNegativeInt]
     right: list[NonNegativeInt]
-
-    # Removed lane validation as new songs might start empty.
