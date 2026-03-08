@@ -169,6 +169,10 @@ h2 {
   align-items: center;
 }
 
+#edit-song .controls #song-edit-select {
+  flex: 1 1 280px;
+}
+
 .spectral-controls label {
   min-width: 220px;
 }

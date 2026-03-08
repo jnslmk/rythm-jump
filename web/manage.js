@@ -35,8 +35,77 @@ let state = {
   beatSelections: {
     left: new Set(),
     right: new Set()
-  }
+  },
+  chartBaselineSignature: '',
+  hasUnsavedChartChanges: false
 };
+
+function sortObjectKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortObjectKeys);
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = sortObjectKeys(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+function stableStringify(value) {
+  return JSON.stringify(sortObjectKeys(value));
+}
+
+function normalizeNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeTimingArray(values) {
+  return Array.from(new Set((values || []).map((value) => Math.round(normalizeNumber(value, 0)))))
+    .sort((a, b) => a - b);
+}
+
+function buildCurrentChartPayload() {
+  const bpmInput = document.getElementById('song-bpm');
+  const offsetInput = document.getElementById('global-offset');
+  return {
+    song_id: currentSongId,
+    travel_time_ms: 1200, // Should probably be configurable per song
+    global_offset_ms: Math.round(normalizeNumber(offsetInput?.value, state.offset)),
+    judgement_windows_ms: { perfect: 50, good: 100 },
+    left: normalizeTimingArray(state.left),
+    right: normalizeTimingArray(state.right),
+    bpm: normalizeNumber(bpmInput?.value, state.bpm),
+    audio_analysis: state.audioAnalysis || null
+  };
+}
+
+function refreshChartDirtyState() {
+  if (!currentSongId) {
+    state.hasUnsavedChartChanges = false;
+    updateControlStates();
+    return;
+  }
+  const currentSignature = stableStringify(buildCurrentChartPayload());
+  state.hasUnsavedChartChanges = state.chartBaselineSignature !== currentSignature;
+  updateControlStates();
+}
+
+function setChartDirtyBaseline() {
+  if (!currentSongId) {
+    state.chartBaselineSignature = '';
+    state.hasUnsavedChartChanges = false;
+    updateControlStates();
+    return;
+  }
+  state.chartBaselineSignature = stableStringify(buildCurrentChartPayload());
+  state.hasUnsavedChartChanges = false;
+  updateControlStates();
+}
 
 function buildBeatTimeline(duration, bpm, offsetSeconds) {
   const beatInterval = 60 / bpm;
@@ -234,6 +303,7 @@ function toggleBeatSelection(beatIndex, lane) {
   }
 
   renderBeatGrid();
+  refreshChartDirtyState();
 }
 
 function resolveManageWaveformDurationMs() {
@@ -639,6 +709,8 @@ async function fetchSongs() {
 async function loadSong(songId) {
   currentSongId = songId;
   isWavePlaying = false;
+  state.chartBaselineSignature = '';
+  state.hasUnsavedChartChanges = false;
   updateControlStates();
   const response = await fetch(`${apiBaseUrl}/charts/${encodeURIComponent(songId)}`);
   const chart = await response.json();
@@ -672,6 +744,7 @@ async function loadSong(songId) {
   
   document.getElementById('song-bpm').value = state.bpm;
   document.getElementById('global-offset').value = state.offset;
+  setChartDirtyBaseline();
   
   document.getElementById('editor-title').textContent = 'Editing';
   const editor = document.getElementById('song-editor');
@@ -717,6 +790,7 @@ async function loadSong(songId) {
     document.getElementById('audio-time').textContent = 
       `0:00 / ${formatTime(wavesurfer.getDuration())}`;
     updateBeatGrid();
+    setChartDirtyBaseline();
     state.waveformZoom = getMaxWaveformZoom();
     applyWaveformZoom();
     updateControlStates();
@@ -818,7 +892,7 @@ function updateControlStates() {
   setControlEnabled('btn-play-pause', canEdit);
   setControlEnabled('btn-tap-bpm', canEdit);
   setControlEnabled('btn-analyze-audio', hasSong);
-  setControlEnabled('btn-save-chart', hasSong);
+  setControlEnabled('btn-save-chart', hasSong && state.hasUnsavedChartChanges);
   updatePlayPauseButtonLabel();
 }
 
@@ -840,16 +914,8 @@ function tapBpm() {
 }
 
 async function saveChart() {
-  const payload = {
-    song_id: currentSongId,
-    travel_time_ms: 1200, // Should probably be configurable per song
-    global_offset_ms: parseInt(document.getElementById('global-offset').value, 10),
-    judgement_windows_ms: { perfect: 50, good: 100 },
-    left: [...state.left],
-    right: [...state.right],
-    bpm: parseFloat(document.getElementById('song-bpm').value),
-    audio_analysis: state.audioAnalysis
-  };
+  if (!state.hasUnsavedChartChanges) return;
+  const payload = buildCurrentChartPayload();
   
   const status = document.getElementById('save-status');
   status.textContent = 'Saving...';
@@ -863,6 +929,7 @@ async function saveChart() {
     });
     if (res.ok) {
       status.textContent = 'Saved successfully!';
+      setChartDirtyBaseline();
       setTimeout(() => { status.textContent = ''; }, 3000);
     } else {
       throw new Error('Save failed');
@@ -923,6 +990,7 @@ async function analyzeAudioMetadata() {
     }
     status.textContent = 'Tempo and spectral analysis saved';
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+    refreshChartDirtyState();
     setTimeout(() => {
       status.textContent = '';
     }, 3000);
@@ -950,6 +1018,8 @@ function init() {
       stopOverviewDrag();
       state.audioAnalysis = null;
       state.spectralRmsMax = 1;
+      state.chartBaselineSignature = '';
+      state.hasUnsavedChartChanges = false;
       if (wavesurfer) {
         wavesurfer.destroy();
         wavesurfer = null;
@@ -1001,12 +1071,15 @@ function init() {
   document.getElementById('btn-tap-bpm').addEventListener('click', () => {
     tapBpm();
     updateBeatGrid();
+    refreshChartDirtyState();
   });
   
   document.getElementById('btn-analyze-audio').addEventListener('click', analyzeAudioMetadata);
   
   document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
+  document.getElementById('song-bpm').addEventListener('input', refreshChartDirtyState);
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
+  document.getElementById('global-offset').addEventListener('input', refreshChartDirtyState);
   document.getElementById('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
   const waveformScroll = document.getElementById('spectral-waveform-scroll');
   waveformScroll.addEventListener('scroll', () => {
