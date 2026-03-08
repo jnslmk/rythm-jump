@@ -4,6 +4,7 @@ const MIN_SPECTRAL_RMS = 0.001;
 const WAVEFORM_ZOOM_MIN = 1;
 const MAX_VISIBLE_BEATS = 16;
 const SUBDIVISIONS_PER_BEAT = 2;
+const BEAT_GRID_OVERSCAN_SUBDIVISIONS = 96;
 const WAVEFORM_BAND_LAYERS = [
   { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 }, // lows
   { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 }, // mids
@@ -16,8 +17,19 @@ let currentSongId = '';
 let isWaveformDragging = false;
 let waveformDragStartX = 0;
 let waveformDragStartLeft = 0;
+let waveformDragTargetLeft = 0;
+let waveformDragRafId = 0;
 let isOverviewDragging = false;
 let overviewDragOffsetRatio = 0;
+let overviewRenderRafId = 0;
+let pendingOverviewProgressMs = 0;
+let overviewBaseCacheCanvas = null;
+let overviewBaseCacheWidth = 0;
+let overviewBaseCacheHeight = 0;
+let overviewBaseCacheAnalysisRef = null;
+let visibleWaveformWindowRatios = { start: 0, end: 1 };
+let beatGridWindowRenderRafId = 0;
+let lastRenderedBeatGridRange = { startIndex: -1, endIndex: -1 };
 let state = {
   songs: [],
   bpm: 120,
@@ -210,6 +222,7 @@ function renderBeatGrid() {
       left: new Set(),
       right: new Set()
     };
+    lastRenderedBeatGridRange = { startIndex: -1, endIndex: -1 };
     return;
   }
 
@@ -217,14 +230,25 @@ function renderBeatGrid() {
   const fragment = document.createDocumentFragment();
   const durationMs = Math.max(resolveManageWaveformDurationMs(), 1);
   const subdivisionMs = Math.max(state.subdivisionIntervalMs || 0, 1);
-  const firstSubdivisionMs = state.subdivisions[0]?.timeMs || 0;
-  const lastSubdivisionMs = state.subdivisions[state.subdivisions.length - 1]?.timeMs || 0;
-  const tailMs = Math.max(durationMs - (lastSubdivisionMs + subdivisionMs), 0);
-  const leadUnits = Math.max(firstSubdivisionMs / subdivisionMs, 0);
+  const visibleWindow = getVisibleWaveformWindowRatios();
+  const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+  const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+  const overscanMs = subdivisionMs * BEAT_GRID_OVERSCAN_SUBDIVISIONS;
+  const renderStartMs = Math.max(0, visibleStartMs - overscanMs);
+  const renderEndMs = Math.min(durationMs, visibleEndMs + overscanMs);
+  const startIndex = lowerBoundSubdivisionIndex(renderStartMs);
+  const endIndex = upperBoundSubdivisionIndex(renderEndMs);
+  const clampedStart = Math.max(0, Math.min(startIndex, state.subdivisions.length - 1));
+  const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.subdivisions.length - 1));
+  const firstRenderedMs = state.subdivisions[clampedStart]?.timeMs || 0;
+  const lastRenderedMs = state.subdivisions[clampedEnd]?.timeMs || firstRenderedMs;
+  const tailMs = Math.max(durationMs - (lastRenderedMs + subdivisionMs), 0);
+  const leadUnits = Math.max(firstRenderedMs / subdivisionMs, 0);
   const tailUnits = Math.max(tailMs / subdivisionMs, 0);
+  const visibleCount = Math.max(clampedEnd - clampedStart + 1, 1);
   const startTrack = leadUnits > 0.0001 ? `minmax(0, ${leadUnits}fr) ` : '';
   const endTrack = tailUnits > 0.0001 ? ` minmax(0, ${tailUnits}fr)` : '';
-  beatGrid.style.gridTemplateColumns = `${startTrack}repeat(${state.subdivisions.length}, minmax(0, 1fr))${endTrack}`;
+  beatGrid.style.gridTemplateColumns = `${startTrack}repeat(${visibleCount}, minmax(0, 1fr))${endTrack}`;
 
   if (leadUnits > 0.0001) {
     const leadSpacer = document.createElement('div');
@@ -233,7 +257,8 @@ function renderBeatGrid() {
     fragment.appendChild(leadSpacer);
   }
 
-  state.subdivisions.forEach((slot, index) => {
+  for (let index = clampedStart; index <= clampedEnd; index += 1) {
+    const slot = state.subdivisions[index];
     const column = document.createElement('div');
     column.className = slot.isBeatStart ? 'beat-column beat-start' : 'beat-column';
     if (slot.isBeatStart && ((slot.beatIndex % 4) + 4) % 4 === 0) {
@@ -264,7 +289,7 @@ function renderBeatGrid() {
     column.appendChild(leftBtn);
     column.appendChild(rightBtn);
     fragment.appendChild(column);
-  });
+  }
 
   if (tailUnits > 0.0001) {
     const tailSpacer = document.createElement('div');
@@ -274,6 +299,74 @@ function renderBeatGrid() {
   }
 
   beatGrid.appendChild(fragment);
+  lastRenderedBeatGridRange = { startIndex: clampedStart, endIndex: clampedEnd };
+}
+
+function lowerBoundSubdivisionIndex(targetMs) {
+  if (!state.subdivisions.length) {
+    return 0;
+  }
+  let low = 0;
+  let high = state.subdivisions.length - 1;
+  let answer = state.subdivisions.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((state.subdivisions[mid]?.timeMs || 0) >= targetMs) {
+      answer = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return answer;
+}
+
+function upperBoundSubdivisionIndex(targetMs) {
+  if (!state.subdivisions.length) {
+    return 0;
+  }
+  let low = 0;
+  let high = state.subdivisions.length - 1;
+  let answer = 0;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((state.subdivisions[mid]?.timeMs || 0) <= targetMs) {
+      answer = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return answer;
+}
+
+function scheduleBeatGridWindowRender() {
+  if (!state.subdivisions.length) {
+    return;
+  }
+  if (beatGridWindowRenderRafId) {
+    return;
+  }
+  beatGridWindowRenderRafId = window.requestAnimationFrame(() => {
+    beatGridWindowRenderRafId = 0;
+    const durationMs = Math.max(resolveManageWaveformDurationMs(), 1);
+    const visibleWindow = getVisibleWaveformWindowRatios();
+    const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+    const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+    const subdivisionMs = Math.max(state.subdivisionIntervalMs || 0, 1);
+    const overscanMs = subdivisionMs * BEAT_GRID_OVERSCAN_SUBDIVISIONS;
+    const startIndex = lowerBoundSubdivisionIndex(Math.max(0, visibleStartMs - overscanMs));
+    const endIndex = upperBoundSubdivisionIndex(Math.min(durationMs, visibleEndMs + overscanMs));
+    const clampedStart = Math.max(0, Math.min(startIndex, state.subdivisions.length - 1));
+    const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.subdivisions.length - 1));
+    if (
+      lastRenderedBeatGridRange.startIndex === clampedStart
+      && lastRenderedBeatGridRange.endIndex === clampedEnd
+    ) {
+      return;
+    }
+    renderBeatGrid();
+  });
 }
 
 function handleBeatGridClick(event) {
@@ -469,7 +562,14 @@ function handleWaveformDragMove(event) {
     return;
   }
   const dragDelta = event.clientX - waveformDragStartX;
-  scrollContainer.scrollLeft = waveformDragStartLeft - dragDelta;
+  waveformDragTargetLeft = waveformDragStartLeft - dragDelta;
+  if (waveformDragRafId) {
+    return;
+  }
+  waveformDragRafId = window.requestAnimationFrame(() => {
+    waveformDragRafId = 0;
+    scrollContainer.scrollLeft = waveformDragTargetLeft;
+  });
 }
 
 function stopWaveformDrag() {
@@ -477,10 +577,15 @@ function stopWaveformDrag() {
     return;
   }
   isWaveformDragging = false;
+  if (waveformDragRafId) {
+    window.cancelAnimationFrame(waveformDragRafId);
+    waveformDragRafId = 0;
+  }
   const scrollContainer = document.getElementById('spectral-waveform-scroll');
   if (scrollContainer) {
     scrollContainer.classList.remove('dragging');
   }
+  scheduleManageOverviewWaveformRender((wavesurfer?.getCurrentTime?.() || 0) * 1000);
 }
 
 function setVisibleWaveformWindowStart(startRatio) {
@@ -495,6 +600,7 @@ function setVisibleWaveformWindowStart(startRatio) {
   const normalizedStartRatio = Math.max(0, Math.min(startRatio, maxStartRatio));
   const maxLeft = Math.max(totalWidth - viewportWidth, 0);
   scrollContainer.scrollLeft = Math.max(0, Math.min(normalizedStartRatio * totalWidth, maxLeft));
+  updateVisibleWaveformWindowRatios(scrollContainer);
 }
 
 function getOverviewPointerRatio(event) {
@@ -564,19 +670,27 @@ function stopOverviewDrag() {
 
 function getVisibleWaveformWindowRatios() {
   const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  const zoomedCanvas = document.getElementById('manage-spectral-waveform');
-  if (!scrollContainer || !zoomedCanvas) {
-    return { start: 0, end: 1 };
+  if (!scrollContainer) {
+    return visibleWaveformWindowRatios;
   }
+  return updateVisibleWaveformWindowRatios(scrollContainer);
+}
 
-  const totalWidth = Math.max(zoomedCanvas.clientWidth, 1);
+function updateVisibleWaveformWindowRatios(scrollContainer) {
+  if (!scrollContainer) {
+    visibleWaveformWindowRatios = { start: 0, end: 1 };
+    return visibleWaveformWindowRatios;
+  }
+  const totalWidth = Math.max(scrollContainer.scrollWidth, 1);
   const viewportWidth = Math.max(scrollContainer.clientWidth, 1);
-  const left = Math.max(0, Math.min(scrollContainer.scrollLeft, totalWidth));
+  const maxLeft = Math.max(totalWidth - viewportWidth, 0);
+  const left = Math.max(0, Math.min(scrollContainer.scrollLeft, maxLeft));
   const right = Math.max(left, Math.min(left + viewportWidth, totalWidth));
-  return {
+  visibleWaveformWindowRatios = {
     start: left / totalWidth,
     end: right / totalWidth
   };
+  return visibleWaveformWindowRatios;
 }
 
 function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
@@ -592,8 +706,12 @@ function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
   const ctx = canvas.getContext('2d');
   const width = Math.max(canvas.clientWidth, 1);
   const height = Math.max(canvas.clientHeight, 1);
-  canvas.width = width;
-  canvas.height = height;
+  if (canvas.width !== width) {
+    canvas.width = width;
+  }
+  if (canvas.height !== height) {
+    canvas.height = height;
+  }
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = '#020617';
@@ -675,19 +793,97 @@ function renderManageSpectralWaveform(progressMs = 0) {
       const leftTarget = progressX - (scrollContainer.clientWidth * 0.5);
       const maxLeft = Math.max(scrollContainer.scrollWidth - scrollContainer.clientWidth, 0);
       scrollContainer.scrollLeft = Math.max(0, Math.min(leftTarget, maxLeft));
+      updateVisibleWaveformWindowRatios(scrollContainer);
     }
   }
 
-  renderManageOverviewWaveform(progressMs);
+  scheduleManageOverviewWaveformRender(progressMs);
 }
 
 function renderManageOverviewWaveform(progressMs = 0) {
   const canvas = document.getElementById('manage-spectral-waveform-overview');
-  renderSpectralWaveformCanvas(canvas, progressMs, {
-    highlightWindowRatios: getVisibleWaveformWindowRatios(),
+  if (!canvas) {
+    return;
+  }
+
+  // Avoid collapsing the draw buffer while the editor section is hidden.
+  if (canvas.clientWidth < 2 || canvas.clientHeight < 2) {
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  const width = Math.max(canvas.clientWidth, 1);
+  const height = Math.max(canvas.clientHeight, 1);
+  if (canvas.width !== width) {
+    canvas.width = width;
+  }
+  if (canvas.height !== height) {
+    canvas.height = height;
+  }
+
+  const baseCanvas = getOverviewBaseCanvas(width, height);
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(baseCanvas, 0, 0);
+
+  const axisY = height - 2;
+  const highlightWindowRatios = getVisibleWaveformWindowRatios();
+  const startRatio = Math.max(0, Math.min(Number(highlightWindowRatios.start) || 0, 1));
+  const endRatio = Math.max(startRatio, Math.min(Number(highlightWindowRatios.end) || 1, 1));
+  const highlightX = startRatio * width;
+  const highlightW = Math.max(1, (endRatio - startRatio) * width);
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(highlightX, 0, highlightW, axisY);
+  ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(highlightX, 0.75, highlightW, Math.max(axisY - 1.5, 1));
+
+  const durationMs = resolveManageWaveformDurationMs();
+  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#f8fafc';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(progressX, 0);
+  ctx.lineTo(progressX, axisY);
+  ctx.stroke();
+}
+
+function scheduleManageOverviewWaveformRender(progressMs = 0) {
+  pendingOverviewProgressMs = progressMs;
+  if (overviewRenderRafId) {
+    return;
+  }
+  overviewRenderRafId = window.requestAnimationFrame(() => {
+    overviewRenderRafId = 0;
+    renderManageOverviewWaveform(pendingOverviewProgressMs);
+  });
+}
+
+function getOverviewBaseCanvas(width, height) {
+  const analysisRef = state.audioAnalysis;
+  if (
+    overviewBaseCacheCanvas
+    && overviewBaseCacheWidth === width
+    && overviewBaseCacheHeight === height
+    && overviewBaseCacheAnalysisRef === analysisRef
+  ) {
+    return overviewBaseCacheCanvas;
+  }
+
+  overviewBaseCacheCanvas = document.createElement('canvas');
+  overviewBaseCacheCanvas.width = width;
+  overviewBaseCacheCanvas.height = height;
+  overviewBaseCacheWidth = width;
+  overviewBaseCacheHeight = height;
+  overviewBaseCacheAnalysisRef = analysisRef;
+
+  renderSpectralWaveformCanvas(overviewBaseCacheCanvas, 0, {
     showBeatMarkers: false,
     showDescriptors: false
   });
+  return overviewBaseCacheCanvas;
 }
 
 async function fetchSongs() {
@@ -709,6 +905,7 @@ async function fetchSongs() {
 async function loadSong(songId) {
   currentSongId = songId;
   isWavePlaying = false;
+  visibleWaveformWindowRatios = { start: 0, end: 1 };
   state.chartBaselineSignature = '';
   state.hasUnsavedChartChanges = false;
   updateControlStates();
@@ -1018,6 +1215,7 @@ function init() {
       stopOverviewDrag();
       state.audioAnalysis = null;
       state.spectralRmsMax = 1;
+      visibleWaveformWindowRatios = { start: 0, end: 1 };
       state.chartBaselineSignature = '';
       state.hasUnsavedChartChanges = false;
       if (wavesurfer) {
@@ -1083,8 +1281,13 @@ function init() {
   document.getElementById('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
   const waveformScroll = document.getElementById('spectral-waveform-scroll');
   waveformScroll.addEventListener('scroll', () => {
-    renderManageOverviewWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
-  });
+    updateVisibleWaveformWindowRatios(waveformScroll);
+    scheduleBeatGridWindowRender();
+    if (isWaveformDragging) {
+      return;
+    }
+    scheduleManageOverviewWaveformRender((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+  }, { passive: true });
   waveformScroll.addEventListener('mousedown', startWaveformDrag);
   window.addEventListener('mousemove', handleWaveformDragMove);
   window.addEventListener('mouseup', stopWaveformDrag);
