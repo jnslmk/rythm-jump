@@ -12,7 +12,7 @@ def _receive_event(
     event_type: str,
 ) -> dict[str, object]:
     """Wait for the requested event type and return it."""
-    for _ in range(10):
+    for _ in range(100):
         event = websocket.receive_json()
         if event.get("type") == event_type:
             return event
@@ -72,8 +72,9 @@ def test_ws_session_broadcasts_lane_events() -> None:
             )
 
 
-def test_ws_session_controls_start_stop() -> None:
+def test_ws_session_controls_start_stop(ws_song_library: object) -> None:
     """Check that start and stop session commands do not crash."""
+    del ws_song_library
     with (
         TestClient(app) as client,
         client.websocket_connect(

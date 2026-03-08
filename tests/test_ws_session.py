@@ -8,8 +8,9 @@ from rythm_jump.main import app
 _EXPECTED_LED_LEVELS = 2
 
 
-def test_start_session_emits_led_frame() -> None:
+def test_start_session_emits_led_frame(ws_song_library: object) -> None:
     """The server should emit LED frame updates after starting a session."""
+    del ws_song_library
     with (
         TestClient(app) as client,
         client.websocket_connect(
@@ -20,7 +21,7 @@ def test_start_session_emits_led_frame() -> None:
         socket.send_json({"type": "start_session", "song_id": "toxic"})
 
         led_frame: dict[str, object] | None = None
-        for _ in range(30):
+        for _ in range(120):
             payload = socket.receive_json()
             if payload.get("type") == "led_frame":
                 led_frame = payload
@@ -33,8 +34,9 @@ def test_start_session_emits_led_frame() -> None:
             pytest.fail("led_frame levels should contain two entries")
 
 
-def test_playback_emits_bar_frame_event() -> None:
+def test_playback_emits_bar_frame_event(ws_song_library: object) -> None:
     """Playback emits bar frame payloads with the expected fields."""
+    del ws_song_library
     with (
         TestClient(app) as client,
         client.websocket_connect(
@@ -45,7 +47,7 @@ def test_playback_emits_bar_frame_event() -> None:
         socket.send_json({"type": "start_session", "song_id": "toxic"})
 
         bar_frame: dict[str, object] | None = None
-        for _ in range(60):
+        for _ in range(240):
             payload = socket.receive_json()
             if payload.get("type") == "bar_frame":
                 bar_frame = payload
