@@ -79,6 +79,26 @@ def _safe_sample(series: np.ndarray, index: int) -> float:
     return float(series[clamped_index])
 
 
+def _smooth_non_negative_series(series: np.ndarray, window_size: int) -> np.ndarray:
+    if series.size == 0:
+        return series
+    if window_size <= 1:
+        return np.maximum(series, 0.0)
+    kernel = np.ones(window_size, dtype=np.float64) / float(window_size)
+    padded = np.pad(series, (window_size // 2,), mode="edge")
+    smoothed = np.convolve(padded, kernel, mode="valid")
+    return np.maximum(smoothed[: series.size], 0.0)
+
+
+def _normalize_series_to_unit(series: np.ndarray) -> np.ndarray:
+    if series.size == 0:
+        return series
+    max_value = float(np.max(series))
+    if max_value <= 0:
+        return np.zeros_like(series, dtype=np.float64)
+    return np.clip(series / max_value, 0.0, 1.0)
+
+
 def _dominant_band_color(dominant_band: str) -> str:
     return {
         "low": "#60a5fa",
@@ -222,6 +242,36 @@ def _analyze_audio_with_librosa(audio_path: Path) -> AudioAnalysis:  # noqa: PLR
     mid_mask = (frequencies >= _LOW_BAND_MAX_HZ) & (frequencies < _MID_BAND_MAX_HZ)
     high_mask = frequencies >= _MID_BAND_MAX_HZ
 
+    stft_power = stft_magnitude**2
+    low_band_frames = (
+        np.mean(stft_power[low_mask], axis=0)
+        if np.any(low_mask)
+        else np.zeros(frame_count)
+    )
+    mid_band_frames = (
+        np.mean(stft_power[mid_mask], axis=0)
+        if np.any(mid_mask)
+        else np.zeros(frame_count)
+    )
+    high_band_frames = (
+        np.mean(stft_power[high_mask], axis=0)
+        if np.any(high_mask)
+        else np.zeros(frame_count)
+    )
+
+    smoothing_window = min(max(frame_count // 120, 3), 15)
+    if smoothing_window % 2 == 0:
+        smoothing_window += 1
+    low_waveform = _normalize_series_to_unit(
+        _smooth_non_negative_series(low_band_frames, smoothing_window),
+    )
+    mid_waveform = _normalize_series_to_unit(
+        _smooth_non_negative_series(mid_band_frames, smoothing_window),
+    )
+    high_waveform = _normalize_series_to_unit(
+        _smooth_non_negative_series(high_band_frames, smoothing_window),
+    )
+
     descriptors: list[BeatSpectralDescriptor] = []
     beat_times_ms: list[int] = []
     for beat_frame, beat_time_sec in zip(beat_frames, beat_times_sec, strict=True):
@@ -278,6 +328,9 @@ def _analyze_audio_with_librosa(audio_path: Path) -> AudioAnalysis:  # noqa: PLR
         tempo_bpm=tempo_bpm,
         beat_times_ms=beat_times_ms,
         beat_descriptors=descriptors,
+        waveform_band_low=low_waveform.astype(float).tolist(),
+        waveform_band_mid=mid_waveform.astype(float).tolist(),
+        waveform_band_high=high_waveform.astype(float).tolist(),
     )
 
 

@@ -4,6 +4,11 @@ const MIN_SPECTRAL_RMS = 0.001;
 const WAVEFORM_ZOOM_MIN = 1;
 const WAVEFORM_ZOOM_STEP = 0.25;
 const MAX_VISIBLE_BEATS = 16;
+const WAVEFORM_BAND_LAYERS = [
+  { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 }, // lows
+  { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 }, // mids
+  { alpha: 0.82, color: 'rgba(14, 165, 233, 0.74)', gain: 1.25 } // highs
+];
 
 let wavesurfer = null;
 let wsRegions = null;
@@ -249,41 +254,57 @@ function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
   }
 }
 
+function sampleEnvelopeValue(series, x, width) {
+  if (!Array.isArray(series) || series.length === 0 || width <= 0) {
+    return 0;
+  }
+  const seriesLen = series.length;
+  const start = Math.floor((x / width) * seriesLen);
+  let end = Math.floor(((x + 1) / width) * seriesLen);
+  if (end <= start) {
+    end = start + 1;
+  }
+
+  let maxValue = 0;
+  for (let i = start; i < end && i < seriesLen; i += 1) {
+    const value = Number(series[i]) || 0;
+    if (value > maxValue) {
+      maxValue = value;
+    }
+  }
+  return Math.max(0, Math.min(maxValue, 1));
+}
+
 function drawDecodedWaveform(ctx, width, centerY, maxAmplitude) {
-  const decodedData = wavesurfer?.getDecodedData?.();
-  if (!decodedData || typeof decodedData.getChannelData !== 'function') {
+  const lowSeries = state.audioAnalysis?.waveform_band_low;
+  const midSeries = state.audioAnalysis?.waveform_band_mid;
+  const highSeries = state.audioAnalysis?.waveform_band_high;
+  if (!Array.isArray(lowSeries) || !Array.isArray(midSeries) || !Array.isArray(highSeries)) {
     return false;
   }
-
-  const channel = decodedData.getChannelData(0);
-  if (!channel || !channel.length) {
+  if (!lowSeries.length || !midSeries.length || !highSeries.length) {
     return false;
   }
-
-  const sampleCount = channel.length;
-  ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
 
   for (let x = 0; x < width; x += 1) {
-    const start = Math.floor((x / width) * sampleCount);
-    let end = Math.floor(((x + 1) / width) * sampleCount);
-    if (end <= start) {
-      end = start + 1;
-    }
+    const bandValues = [
+      sampleEnvelopeValue(lowSeries, x, width),
+      sampleEnvelopeValue(midSeries, x, width),
+      sampleEnvelopeValue(highSeries, x, width)
+    ];
 
-    let min = 1;
-    let max = -1;
-    for (let i = start; i < end && i < sampleCount; i += 1) {
-      const sample = channel[i];
-      if (sample < min) min = sample;
-      if (sample > max) max = sample;
+    for (let i = 0; i < WAVEFORM_BAND_LAYERS.length; i += 1) {
+      const layer = WAVEFORM_BAND_LAYERS[i];
+      const amplitude = Math.max(1, bandValues[i] * layer.gain * maxAmplitude);
+      const top = Math.max(0, centerY - amplitude);
+      const bottom = Math.min(centerY * 2, centerY + amplitude);
+      const barHeight = Math.max(1, bottom - top);
+      ctx.globalAlpha = layer.alpha;
+      ctx.fillStyle = layer.color;
+      ctx.fillRect(x, top, 1, barHeight);
     }
-
-    const top = Math.max(0, centerY + (min * maxAmplitude));
-    const bottom = Math.min((centerY * 2), centerY + (max * maxAmplitude));
-    const barHeight = Math.max(1, bottom - top);
-    ctx.fillRect(x, top, 1, barHeight);
   }
-
+  ctx.globalAlpha = 1;
   return true;
 }
 

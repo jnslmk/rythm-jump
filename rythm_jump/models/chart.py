@@ -59,6 +59,9 @@ class AudioAnalysis(BaseModel):
     tempo_bpm: PositiveFloat
     beat_times_ms: list[NonNegativeInt]
     beat_descriptors: list[BeatSpectralDescriptor]
+    waveform_band_low: list[NonNegativeFloat] | None = None
+    waveform_band_mid: list[NonNegativeFloat] | None = None
+    waveform_band_high: list[NonNegativeFloat] | None = None
 
 
 class Chart(BaseModel):
