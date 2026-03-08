@@ -1,38 +1,46 @@
+"""FastAPI endpoints for uploading and querying song charts."""
+
 import collections
-from collections import abc as collections_abc
 import json
-import numpy as np
 import re
 import warnings
+from collections import abc as collections_abc
 from pathlib import Path
+from typing import Annotated, Final
 
+import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from madmom.features.beats import RNNBeatProcessor
 from madmom.features.tempo import TempoEstimationProcessor
+from pydantic import ValidationError
+
 from rythm_jump.models.chart import Chart, JudgementWindowsMs
+
+router = APIRouter()
+
+_MIN_BPM: Final[int] = 60
+_MAX_BPM: Final[int] = 180
 
 
 if not hasattr(collections, "MutableSequence"):
     collections.MutableSequence = collections_abc.MutableSequence
 
-if not hasattr(np, "float"):
-    setattr(np, "float", float)
-
-if not hasattr(np, "int"):
-    setattr(np, "int", int)
 
 visible_deprecation_warning = getattr(
-    np, "VisibleDeprecationWarning", DeprecationWarning
+    np,
+    "VisibleDeprecationWarning",
+    DeprecationWarning,
 )
 warnings.filterwarnings(
     "ignore",
     category=visible_deprecation_warning,
-    message=r"dtype\(\): align should be passed as Python or NumPy boolean but got `align=0`\..*",
+    message=(
+        r"dtype\(\): align should be passed as Python or NumPy boolean "
+        r"but got `align=0`\..*"
+    ),
 )
 
-
-router = APIRouter()
 
 _SONG_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -62,13 +70,14 @@ def _estimate_bpm_from_audio(audio_path: Path) -> float:
     tempo_processor = TempoEstimationProcessor()
     activations = beat_processor(str(audio_path))
     tempos = tempo_processor(activations)
-    if len(tempos) == 0:
-        raise ValueError("no_tempo_detected")
+    if not tempos:
+        message = "no_tempo_detected"
+        raise ValueError(message)
 
     bpm_candidate = float(tempos[0][0])
-    while bpm_candidate < 60:
+    while bpm_candidate < _MIN_BPM:
         bpm_candidate *= 2
-    while bpm_candidate > 180:
+    while bpm_candidate > _MAX_BPM:
         bpm_candidate /= 2
 
     return round(bpm_candidate, 1)
@@ -76,18 +85,21 @@ def _estimate_bpm_from_audio(audio_path: Path) -> float:
 
 @router.get("/songs")
 def list_songs() -> list[str]:
+    """Return the identifiers of all songs that have a chart."""
     songs_dir = _charts_root_dir()
     if not songs_dir.exists():
         return []
+
     return [
-        d.name
-        for d in songs_dir.iterdir()
-        if d.is_dir() and (d / "chart.json").exists()
+        entry.name
+        for entry in songs_dir.iterdir()
+        if entry.is_dir() and (entry / "chart.json").exists()
     ]
 
 
 @router.get("/charts/{song_id}")
 def get_chart(song_id: str) -> Chart:
+    """Load a chart for ``song_id`` or raise an HTTP error."""
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
@@ -98,12 +110,13 @@ def get_chart(song_id: str) -> Chart:
     try:
         data = json.loads(chart_path.read_text(encoding="utf-8"))
         return Chart.model_validate(data)
-    except Exception:
-        raise HTTPException(status_code=500, detail="failed_to_load_chart")
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(status_code=500, detail="failed_to_load_chart") from exc
 
 
 @router.get("/songs/{song_id}/audio")
 def get_audio(song_id: str) -> FileResponse:
+    """Return the uploaded audio file for ``song_id`` if it exists."""
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
@@ -116,15 +129,16 @@ def get_audio(song_id: str) -> FileResponse:
 
 @router.post("/songs")
 async def upload_song(
-    song_id: str = Form(...), audio: UploadFile = File(...)
+    song_id: Annotated[str, Form(...)],
+    audio: Annotated[UploadFile, File(...)],
 ) -> dict[str, object]:
+    """Upload an audio file and create a default chart if needed."""
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
     song_dir = _charts_root_dir() / song_id
     song_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use original extension if available
     filename = audio.filename or "audio.mp3"
     ext = Path(filename).suffix or ".mp3"
     audio_path = song_dir / f"audio{ext}"
@@ -132,7 +146,6 @@ async def upload_song(
     with audio_path.open("wb") as buffer:
         buffer.write(await audio.read())
 
-    # Create default chart if it doesn't exist
     chart_path = song_dir / "chart.json"
     if not chart_path.exists():
         default_chart = Chart(
@@ -154,6 +167,7 @@ async def upload_song(
 
 @router.put("/charts/{song_id}")
 def save_chart(song_id: str, chart: Chart) -> dict[str, object]:
+    """Persist ``chart`` if it matches ``song_id`` and the folder exists."""
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
@@ -166,7 +180,8 @@ def save_chart(song_id: str, chart: Chart) -> dict[str, object]:
 
     chart_path = song_dir / "chart.json"
     chart_path.write_text(
-        json.dumps(chart.model_dump(mode="json"), indent=2), encoding="utf-8"
+        json.dumps(chart.model_dump(mode="json"), indent=2),
+        encoding="utf-8",
     )
 
     return {"ok": True, "song_id": song_id}
@@ -174,6 +189,7 @@ def save_chart(song_id: str, chart: Chart) -> dict[str, object]:
 
 @router.get("/charts/{song_id}/tempo")
 def analyze_chart_tempo(song_id: str) -> dict[str, float]:
+    """Estimate the tempo of a song and return it."""
     if not _SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
 
@@ -183,7 +199,7 @@ def analyze_chart_tempo(song_id: str) -> dict[str, float]:
 
     try:
         bpm = _estimate_bpm_from_audio(audio_path)
-    except Exception as exc:
+    except ValueError as exc:
         raise HTTPException(status_code=500, detail="tempo_analysis_failed") from exc
 
     return {"bpm": bpm}

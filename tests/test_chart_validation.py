@@ -6,6 +6,13 @@ from pydantic import ValidationError
 
 from rythm_jump.engine.chart_loader import load_chart
 
+TRAVEL_TIME_MS = 1200
+PERFECT_WINDOW_MS = 50
+GOOD_WINDOW_MS = 100
+NEGATIVE_GLOBAL_OFFSET_MS = -120
+DEFAULT_LEFT = [1000, 2000, 3000]
+DEFAULT_RIGHT = [1500, 2500]
+
 
 TEST_SONG_ID = "sample-song"
 
@@ -13,11 +20,11 @@ TEST_SONG_ID = "sample-song"
 def _base_chart_payload(song_id: str = TEST_SONG_ID) -> dict[str, object]:
     return {
         "song_id": song_id,
-        "travel_time_ms": 1200,
+        "travel_time_ms": TRAVEL_TIME_MS,
         "global_offset_ms": 0,
-        "judgement_windows_ms": {"perfect": 50, "good": 100},
-        "left": [1000, 2000, 3000],
-        "right": [1500, 2500],
+        "judgement_windows_ms": {"perfect": PERFECT_WINDOW_MS, "good": GOOD_WINDOW_MS},
+        "left": DEFAULT_LEFT,
+        "right": DEFAULT_RIGHT,
     }
 
 
@@ -31,12 +38,12 @@ def test_load_chart_accepts_independent_lanes(tmp_path: Path) -> None:
     chart = load_chart(_write_chart(tmp_path, _base_chart_payload()))
 
     assert chart.song_id == TEST_SONG_ID
-    assert chart.travel_time_ms == 1200
+    assert chart.travel_time_ms == TRAVEL_TIME_MS
     assert chart.global_offset_ms == 0
-    assert chart.judgement_windows_ms.perfect == 50
-    assert chart.judgement_windows_ms.good == 100
-    assert chart.left == [1000, 2000, 3000]
-    assert chart.right == [1500, 2500]
+    assert chart.judgement_windows_ms.perfect == PERFECT_WINDOW_MS
+    assert chart.judgement_windows_ms.good == GOOD_WINDOW_MS
+    assert chart.left == DEFAULT_LEFT
+    assert chart.right == DEFAULT_RIGHT
 
 
 @pytest.mark.parametrize(
@@ -97,8 +104,8 @@ def test_load_chart_rejects_good_window_less_than_perfect(tmp_path: Path) -> Non
 
 def test_load_chart_accepts_negative_global_offset(tmp_path: Path) -> None:
     payload = _base_chart_payload()
-    payload["global_offset_ms"] = -120
+    payload["global_offset_ms"] = NEGATIVE_GLOBAL_OFFSET_MS
 
     chart = load_chart(_write_chart(tmp_path, payload))
 
-    assert chart.global_offset_ms == -120
+    assert chart.global_offset_ms == NEGATIVE_GLOBAL_OFFSET_MS

@@ -1,3 +1,5 @@
+import pytest
+
 from rythm_jump.hw import gpio_input
 
 
@@ -19,17 +21,21 @@ class _FakeGpioModule:
     def setup(self, pin: int, direction: int, pull_up_down: int) -> None:
         self.setup_calls.append((pin, direction, pull_up_down))
 
-    def input(self, pin: int) -> int:
+    def input(self, _pin: int) -> int:
         return self.read_value
 
 
-def test_read_contact_pressed_returns_false_when_gpio_unavailable(monkeypatch) -> None:
+def test_read_contact_pressed_returns_false_when_gpio_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(gpio_input, "_load_gpio_module", lambda: None)
 
     assert gpio_input.read_contact_pressed() is False
 
 
-def test_read_contact_pressed_uses_active_low_pull_up(monkeypatch) -> None:
+def test_read_contact_pressed_uses_active_low_pull_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fake = _FakeGpioModule(read_value=_FakeGpioModule.LOW)
     monkeypatch.setattr(gpio_input, "_load_gpio_module", lambda: fake)
     monkeypatch.setenv("RHYTHM_CONTACT_PIN", "22")

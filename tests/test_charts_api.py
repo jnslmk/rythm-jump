@@ -1,13 +1,15 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rythm_jump.api import charts as charts_module
 from rythm_jump.main import app
 
-
 TEST_SONG_ID = "test-song"
+HTTP_NOT_FOUND = 404
+HTTP_OK = 200
 
 
 def _chart_payload(song_id: str) -> dict[str, object]:
@@ -22,18 +24,22 @@ def _chart_payload(song_id: str) -> dict[str, object]:
     }
 
 
-def test_put_chart_rejects_unknown_song_id(tmp_path: Path, monkeypatch) -> None:
+def test_put_chart_rejects_unknown_song_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(charts_module, "_charts_root_dir", lambda: tmp_path)
 
     with TestClient(app) as client:
         response = client.put("/api/charts/missing", json=_chart_payload("missing"))
 
-    assert response.status_code == 404
+    assert response.status_code == HTTP_NOT_FOUND
     assert response.json() == {"detail": "unknown_song_id"}
 
 
 def test_put_chart_writes_chart_for_existing_song_dir(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     song_dir = tmp_path / TEST_SONG_ID
     song_dir.mkdir(parents=True)
@@ -44,7 +50,7 @@ def test_put_chart_writes_chart_for_existing_song_dir(
     with TestClient(app) as client:
         response = client.put(f"/api/charts/{TEST_SONG_ID}", json=payload)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTP_OK
     assert response.json() == {"ok": True, "song_id": TEST_SONG_ID}
 
     chart_path = song_dir / "chart.json"

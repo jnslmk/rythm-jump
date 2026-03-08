@@ -1,3 +1,7 @@
+from collections.abc import Iterator
+
+import pytest
+
 from rythm_jump.engine.session import GameSession, State
 from rythm_jump.headless import (
     run_headless_loop,
@@ -6,6 +10,8 @@ from rythm_jump.headless import (
     trigger_start_if_needed,
 )
 from rythm_jump.main import run_headless_polling_step
+
+EXPECTED_PROCESSED_EVENTS = 2
 
 
 def test_should_start_when_contact_pressed() -> None:
@@ -43,7 +49,7 @@ def test_run_headless_loop_starts_on_first_valid_press_and_stops() -> None:
     session = GameSession()
     processed = 0
 
-    def _events():
+    def _events() -> Iterator[bool]:
         nonlocal processed
         for event in (False, True, True):
             processed += 1
@@ -53,14 +59,14 @@ def test_run_headless_loop_starts_on_first_valid_press_and_stops() -> None:
 
     assert started is True
     assert session.state == State.PLAYING
-    assert processed == 2
+    assert processed == EXPECTED_PROCESSED_EVENTS
 
 
 def test_run_headless_loop_returns_false_when_no_start_occurs() -> None:
     session = GameSession()
     processed = 0
 
-    def _events():
+    def _events() -> Iterator[bool]:
         nonlocal processed
         for event in (False, False):
             processed += 1
@@ -70,7 +76,7 @@ def test_run_headless_loop_returns_false_when_no_start_occurs() -> None:
 
     assert started is False
     assert session.state == State.IDLE
-    assert processed == 2
+    assert processed == EXPECTED_PROCESSED_EVENTS
 
 
 def test_run_headless_polling_step_uses_contact_reader() -> None:
@@ -84,7 +90,9 @@ def test_run_headless_polling_step_uses_contact_reader() -> None:
     assert session.state == State.PLAYING
 
 
-def test_run_headless_polling_step_uses_default_gpio_reader(monkeypatch) -> None:
+def test_run_headless_polling_step_uses_default_gpio_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = GameSession()
     monkeypatch.setattr("rythm_jump.main.read_contact_pressed", lambda: True)
 

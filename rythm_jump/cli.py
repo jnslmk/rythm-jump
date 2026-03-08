@@ -1,9 +1,12 @@
-def dev() -> None:
-    """Run development server with auto-reload."""
-    import os
-    import sys
+"""CLI helpers for running Rhythm Jump in development."""
 
-    os.execvp(
+import os
+import sys
+
+
+def dev() -> None:
+    """Run the development server with auto-reload."""
+    os.execvp(  # noqa: S606
         sys.executable,
         [
             sys.executable,
@@ -12,7 +15,7 @@ def dev() -> None:
             "rythm_jump.main:app",
             "--reload",
             "--host",
-            "0.0.0.0",
+            "0.0.0.0",  # noqa: S104
             "--port",
             "8000",
         ],

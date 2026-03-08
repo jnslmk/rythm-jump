@@ -28,13 +28,17 @@ def test_judge_boundary_at_good_is_good() -> None:
 
 
 @pytest.mark.parametrize(
-    ("perfect", "good"),
+    ("perfect", "good", "match"),
     [
-        (-1, 70),
-        (30, -1),
-        (71, 70),
+        (-1, 70, "perfect must be >= 0"),
+        (30, -1, "good must be >= 0"),
+        (71, 70, "perfect must be <= good"),
     ],
 )
-def test_judge_rejects_invalid_windows(perfect: int, good: int) -> None:
-    with pytest.raises(ValueError):
+def test_judge_rejects_invalid_windows(
+    perfect: int,
+    good: int,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
         judge(delta_ms=10, perfect=perfect, good=good)

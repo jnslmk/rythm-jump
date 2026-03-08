@@ -45,3 +45,17 @@ all = "error"
 
 [tool.ty.terminal]
 error-on-warning = true
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["ALL"]
+per-file-ignores = { "tests/*.py" = ["S101", "D100", "D103"] }
+
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:madmom\\.ml\\.nn\\.activations",
+    "ignore::DeprecationWarning:madmom\\.features\\.onsets",
+]
