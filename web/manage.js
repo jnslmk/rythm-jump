@@ -1,4 +1,5 @@
 const apiBaseUrl = '/api';
+const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
 
 let wavesurfer = null;
 let wsRegions = null;
@@ -183,10 +184,20 @@ async function fetchSongs() {
   const select = document.getElementById('song-edit-select');
   select.innerHTML = '<option value="">Select a song to edit</option>' + 
     state.songs.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  const persistedSongId = window.localStorage.getItem(MANAGE_SELECTED_SONG_KEY) || '';
+  if (persistedSongId && state.songs.includes(persistedSongId)) {
+    select.value = persistedSongId;
+    await loadSong(persistedSongId);
+  } else if (persistedSongId) {
+    window.localStorage.removeItem(MANAGE_SELECTED_SONG_KEY);
+  }
 }
 
 async function loadSong(songId) {
   currentSongId = songId;
+  isWavePlaying = false;
+  updateControlStates();
   const response = await fetch(`${apiBaseUrl}/charts/${encodeURIComponent(songId)}`);
   const chart = await response.json();
   
@@ -241,9 +252,26 @@ async function loadSong(songId) {
   });
   
   wavesurfer.on('ready', () => {
+    isWavePlaying = false;
     document.getElementById('audio-time').textContent = 
       `0:00 / ${formatTime(wavesurfer.getDuration())}`;
     updateBeatGrid();
+    updateControlStates();
+  });
+
+  wavesurfer.on('play', () => {
+    isWavePlaying = true;
+    updateControlStates();
+  });
+
+  wavesurfer.on('pause', () => {
+    isWavePlaying = false;
+    updateControlStates();
+  });
+
+  wavesurfer.on('finish', () => {
+    isWavePlaying = false;
+    updateControlStates();
   });
 }
 
@@ -294,6 +322,7 @@ async function analyzeBpm() {
   }
 
   status.textContent = 'Analyzing...';
+  setControlEnabled('btn-analyze-bpm', false);
 
   try {
     const response = await fetch(
@@ -320,6 +349,8 @@ async function analyzeBpm() {
   } catch (e) {
     console.error(e);
     status.textContent = e instanceof Error ? e.message : 'Analysis failed';
+  } finally {
+    updateControlStates();
   }
 }
 
@@ -330,6 +361,33 @@ function formatTime(seconds) {
 }
 
 let tapTimes = [];
+let isWavePlaying = false;
+
+function setControlEnabled(id, enabled) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.disabled = !enabled;
+}
+
+function updatePlayPauseButtonLabel() {
+  const button = document.getElementById('btn-play-pause');
+  if (!button) return;
+  button.textContent = isWavePlaying ? 'Pause' : 'Play';
+  button.setAttribute('aria-label', isWavePlaying ? 'Pause audio' : 'Play audio');
+}
+
+function updateControlStates() {
+  const hasSong = Boolean(currentSongId);
+  const hasWave = Boolean(wavesurfer);
+  const canEdit = hasSong && hasWave;
+
+  setControlEnabled('btn-play-pause', canEdit);
+  setControlEnabled('btn-tap-bpm', canEdit);
+  setControlEnabled('btn-analyze-bpm', hasSong);
+  setControlEnabled('btn-save-chart', hasSong);
+  updatePlayPauseButtonLabel();
+}
+
 function tapBpm() {
   const now = performance.now();
   tapTimes.push(now);
@@ -360,6 +418,7 @@ async function saveChart() {
   
   const status = document.getElementById('save-status');
   status.textContent = 'Saving...';
+  setControlEnabled('btn-save-chart', false);
   
   try {
     const res = await fetch(`${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}`, {
@@ -375,21 +434,28 @@ async function saveChart() {
     }
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
+  } finally {
+    updateControlStates();
   }
 }
 
 function init() {
   document.getElementById('song-edit-select').addEventListener('change', (e) => {
     if (e.target.value) {
+      window.localStorage.setItem(MANAGE_SELECTED_SONG_KEY, e.target.value);
       loadSong(e.target.value);
     } else {
+      window.localStorage.removeItem(MANAGE_SELECTED_SONG_KEY);
       const editor = document.getElementById('song-editor');
       editor.classList.add('hidden');
       editor.setAttribute('aria-hidden', 'true');
+      currentSongId = '';
+      isWavePlaying = false;
       if (wavesurfer) {
         wavesurfer.destroy();
         wavesurfer = null;
       }
+      updateControlStates();
     }
   });
   
@@ -402,6 +468,8 @@ function init() {
     if (!songId || !audioFile) return;
     
     status.textContent = 'Uploading...';
+    const uploadBtn = e.target.querySelector('button[type="submit"]');
+    if (uploadBtn) uploadBtn.disabled = true;
     
     const formData = new FormData();
     formData.append('song_id', songId);
@@ -414,22 +482,20 @@ function init() {
       });
       if (res.ok) {
         status.textContent = 'Upload complete!';
-        fetchSongs();
-        loadSong(songId);
+        window.localStorage.setItem(MANAGE_SELECTED_SONG_KEY, songId);
+        await fetchSongs();
       } else {
         throw new Error('Upload failed');
       }
     } catch (e) {
       status.textContent = 'Error: ' + e.message;
+    } finally {
+      if (uploadBtn) uploadBtn.disabled = false;
     }
   });
   
   document.getElementById('btn-play-pause').addEventListener('click', () => {
     if (wavesurfer) wavesurfer.playPause();
-  });
-  
-  document.getElementById('btn-stop-audio').addEventListener('click', () => {
-    if (wavesurfer) wavesurfer.stop();
   });
   
   document.getElementById('btn-tap-bpm').addEventListener('click', () => {
@@ -446,6 +512,7 @@ function init() {
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
   
   renderBeatGrid();
+  updateControlStates();
   fetchSongs();
 }
 
