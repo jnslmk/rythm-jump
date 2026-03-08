@@ -474,6 +474,27 @@ textarea {
 .spectral-waveform-scroll {
   overflow-x: auto;
   overflow-y: hidden;
+  cursor: grab;
+}
+
+.spectral-waveform-scroll.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.overview-waveform-wrap {
+  margin-top: 0.25rem;
+}
+
+.spectral-waveform-overview {
+  height: 72px;
+  min-width: 100%;
+  width: 100%;
+  cursor: grab;
+}
+
+.spectral-waveform-overview.dragging {
+  cursor: grabbing;
 }
 
 #audio-time {
