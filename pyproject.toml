@@ -36,3 +36,12 @@ packages = ["rythm_jump"]
 
 [tool.uv.extra-build-dependencies]
 madmom = ["Cython", "numpy"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+all = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
