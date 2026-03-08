@@ -7,7 +7,7 @@ def test_start_session_emits_led_frame() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/session/default-session") as socket:
             socket.receive_json()  # initial session_state
-            socket.send_json({"type": "start_session", "song_id": "demo"})
+            socket.send_json({"type": "start_session", "song_id": "toxic"})
 
             led_frame = None
             for _ in range(30):
@@ -24,7 +24,7 @@ def test_playback_emits_bar_frame_event() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/session/default-session") as socket:
             socket.receive_json()  # initial session_state
-            socket.send_json({"type": "start_session", "song_id": "demo"})
+            socket.send_json({"type": "start_session", "song_id": "toxic"})
 
             bar_frame = None
             for _ in range(60):

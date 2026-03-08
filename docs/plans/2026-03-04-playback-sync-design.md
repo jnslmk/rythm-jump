@@ -11,7 +11,7 @@
 3. Both ends share richer payloads (e.g., `progress_ms`, `levels`) so the canvas can follow the backend-decided timeline instead of relying on manual key presses.
 
 ## Architecture & Data Flow
-1. `rythm_jump/api/charts.py` remains responsible for listing songs and serving `/songs/{id}/audio`, but `_charts_root_dir()` must resolve to the repo-local `songs/` folder (current use of `parents[3]` points outside the repo and misses `songs/demo`).
+1. `rythm_jump/api/charts.py` remains responsible for listing songs and serving `/songs/{id}/audio`, but `_charts_root_dir()` must resolve to the repo-local `songs/` folder (current use of `parents[3]` points outside the repo and misses the repo-local chart directory).
 2. `rythm_jump/api/ws.py`:
    - Validates `song_id`, loads the chart via `engine/chart_loader.load_chart`, and ensures the corresponding audio file exists before switching the session state.
    - Spawns an asyncio ticker (100ms) that advances `progress_ms`, emits `led_frame` payloads with left/right intensity plus lane hits based on the chart, and regularly sends `session_state` updates (`playing`, `complete`).

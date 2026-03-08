@@ -55,7 +55,7 @@
 ### Chart Schema
 ```json
 {
-  "song_id": "demo",
+  "song_id": "toxic",
   "travel_time_ms": 650,
   "global_offset_ms": 0,
   "judgement_windows_ms": { "perfect": 30, "good": 70 },

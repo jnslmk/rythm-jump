@@ -45,7 +45,7 @@ git commit -m "fix: resolve songs folder relative to repo"
 - Create: `tests/test_ws_session.py:1-140`
 
 **Step 1: Write the failing integration test**
-- Add `tests/test_ws_session.py` that starts the FastAPI app, opens a WebSocket connection to `/ws/session/default-session`, sends a `start_session` message with `song_id` (e.g., `demo` or `britney_spears-toxic`), and asserts the stream emits at least one payload whose `type` is `led_frame` and which contains both `levels` and `progress_ms` before the test closes.
+- Add `tests/test_ws_session.py` that starts the FastAPI app, opens a WebSocket connection to `/ws/session/default-session`, sends a `start_session` message with `song_id` (e.g., `toxic` or `britney_spears-toxic`), and asserts the stream emits at least one payload whose `type` is `led_frame` and which contains both `levels` and `progress_ms` before the test closes.
 
 **Step 2: Run the test to see it fail**
 - Run: `uv run pytest tests/test_ws_session.py -q`

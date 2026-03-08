@@ -47,7 +47,7 @@ def test_ws_session_controls_start_stop() -> None:
         with client.websocket_connect("/ws/session/any-id") as websocket:
             _receive_event(websocket, "session_state")
 
-            websocket.send_json({"type": "start_session", "song_id": "demo"})
+            websocket.send_json({"type": "start_session", "song_id": "toxic"})
             state_event = _receive_event(websocket, "session_state")
             assert state_event["state"] == "playing"
 

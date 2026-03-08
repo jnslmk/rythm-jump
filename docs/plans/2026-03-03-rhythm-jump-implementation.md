@@ -79,7 +79,7 @@ git commit --no-gpg-sign -m "feat(backend): bootstrap fastapi service with healt
 - Create: `backend/rhythm_jump/models/chart.py`
 - Create: `backend/rhythm_jump/engine/chart_loader.py`
 - Create: `backend/tests/test_chart_validation.py`
-- Create: `songs/demo/chart.json`
+- Create: `songs/<song-id>/chart.json`
 
 **Step 1: Write the failing test**
 
@@ -91,7 +91,7 @@ from rhythm_jump.engine.chart_loader import load_chart
 def test_independent_lanes_allowed(tmp_path):
     path = tmp_path / 'chart.json'
     path.write_text('''{
-      "song_id":"demo",
+      "song_id":"toxic",
       "travel_time_ms":650,
       "global_offset_ms":0,
       "judgement_windows_ms":{"perfect":30,"good":70},
@@ -120,7 +120,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add backend/rhythm_jump/models/chart.py backend/rhythm_jump/engine/chart_loader.py backend/tests/test_chart_validation.py songs/demo/chart.json
+git add backend/rhythm_jump/models/chart.py backend/rhythm_jump/engine/chart_loader.py backend/tests/test_chart_validation.py
 git commit --no-gpg-sign -m "feat(engine): add chart schema and validation for independent lanes"
 ```
 

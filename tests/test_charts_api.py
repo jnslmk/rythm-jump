@@ -7,6 +7,9 @@ from rythm_jump.api import charts as charts_module
 from rythm_jump.main import app
 
 
+TEST_SONG_ID = "test-song"
+
+
 def _chart_payload(song_id: str) -> dict[str, object]:
     return {
         "song_id": song_id,
@@ -32,17 +35,17 @@ def test_put_chart_rejects_unknown_song_id(tmp_path: Path, monkeypatch) -> None:
 def test_put_chart_writes_chart_for_existing_song_dir(
     tmp_path: Path, monkeypatch
 ) -> None:
-    song_dir = tmp_path / "demo"
+    song_dir = tmp_path / TEST_SONG_ID
     song_dir.mkdir(parents=True)
     monkeypatch.setattr(charts_module, "_charts_root_dir", lambda: tmp_path)
 
-    payload = _chart_payload("demo")
+    payload = _chart_payload(TEST_SONG_ID)
 
     with TestClient(app) as client:
-        response = client.put("/api/charts/demo", json=payload)
+        response = client.put(f"/api/charts/{TEST_SONG_ID}", json=payload)
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "song_id": "demo"}
+    assert response.json() == {"ok": True, "song_id": TEST_SONG_ID}
 
     chart_path = song_dir / "chart.json"
     assert chart_path.exists()

@@ -7,13 +7,12 @@ from pydantic import ValidationError
 from rythm_jump.engine.chart_loader import load_chart
 
 
-def _demo_chart_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "songs" / "demo" / "chart.json"
+TEST_SONG_ID = "sample-song"
 
 
-def _base_chart_payload() -> dict[str, object]:
+def _base_chart_payload(song_id: str = TEST_SONG_ID) -> dict[str, object]:
     return {
-        "song_id": "demo",
+        "song_id": song_id,
         "travel_time_ms": 1200,
         "global_offset_ms": 0,
         "judgement_windows_ms": {"perfect": 50, "good": 100},
@@ -28,10 +27,10 @@ def _write_chart(tmp_path: Path, payload: dict[str, object]) -> Path:
     return chart_path
 
 
-def test_load_chart_accepts_independent_lanes() -> None:
-    chart = load_chart(_demo_chart_path())
+def test_load_chart_accepts_independent_lanes(tmp_path: Path) -> None:
+    chart = load_chart(_write_chart(tmp_path, _base_chart_payload()))
 
-    assert chart.song_id == "demo"
+    assert chart.song_id == TEST_SONG_ID
     assert chart.travel_time_ms == 1200
     assert chart.global_offset_ms == 0
     assert chart.judgement_windows_ms.perfect == 50

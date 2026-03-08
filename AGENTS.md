@@ -4,7 +4,7 @@
 `rythm_jump/` contains backend runtime code: `api/` (HTTP/WebSocket), `engine/` (sessions, scoring, LED frames), `hw/` (GPIO/LED adapters), and `models/` (chart schemas).  
 `tests/` holds pytest files (`test_*.py`).  
 `web/` contains the browser UI (`index.html`, `manage.html`, `*.js`, `style.css`).  
-`songs/` stores chart data (for example `songs/demo/chart.json`).  
+`songs/` stores chart data (for example `songs/toxic/chart.json`).  
 `scripts/` contains local helpers, `docs/` contains runbooks/plans, and `systemd/` contains Raspberry Pi service units.
 
 ## Build, Test, and Development Commands
