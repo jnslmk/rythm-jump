@@ -347,7 +347,7 @@ async function loadSong(songId) {
   document.getElementById('song-bpm').value = state.bpm;
   document.getElementById('global-offset').value = state.offset;
   
-  document.getElementById('editor-title').textContent = `Editing: ${songId}`;
+  document.getElementById('editor-title').textContent = 'Editing';
   const editor = document.getElementById('song-editor');
   editor.classList.remove('hidden');
   editor.setAttribute('aria-hidden', 'false');

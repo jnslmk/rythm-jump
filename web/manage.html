@@ -28,7 +28,7 @@
         <h2>Add New Song</h2>
         <form id="upload-form" class="flex-gap">
           <label>
-            <span class="label">Song ID (slug)</span>
+            <span class="label">Song ID</span>
             <input id="new-song-id" type="text" placeholder="my-awesome-song" required class="input-control" />
           </label>
           <label>
@@ -62,24 +62,25 @@
             aria-label="Colored spectral waveform"
           ></canvas>
           <div id="timeline"></div>
-        </div>
-        
-        <div class="editor-controls">
-          <button id="btn-play-pause" class="accent-button">Play</button>
-          <span id="audio-time">0:00 / 0:00</span>
+          <div class="editor-controls">
+            <button id="btn-play-pause" class="accent-button">Play</button>
+            <span id="audio-time">0:00 / 0:00</span>
+          </div>
         </div>
 
         <div class="bpm-controls">
           <fieldset>
             <legend>BPM & Timing</legend>
-            <label>
-              <span class="label">BPM</span>
-              <input id="song-bpm" type="number" step="0.1" value="120" class="input-control" />
-            </label>
-            <label>
-              <span class="label">Beat Grid Offset (ms)</span>
-              <input id="global-offset" type="number" value="0" class="input-control" />
-            </label>
+            <div class="timing-input-row">
+              <label>
+                <span class="label">BPM</span>
+                <input id="song-bpm" type="number" step="0.1" value="120" class="input-control" />
+              </label>
+              <label>
+                <span class="label">Beat Grid Offset (ms)</span>
+                <input id="global-offset" type="number" value="0" class="input-control" />
+              </label>
+            </div>
             <div class="bpm-actions">
               <button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button>
               <button id="btn-analyze-audio" type="button" class="ghost-button">Analyze Song</button>
