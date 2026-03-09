@@ -10,6 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Grotesk:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="vendor/oat.min.css" />
     <link rel="stylesheet" href="style.css" />
     <!-- WaveSurfer for waveform visualizer -->
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
@@ -17,16 +18,24 @@
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
     <script src="spectral-waveform.js"></script>
   </head>
-  <body>
-    <nav class="center-content flex-gap">
-      <a href="index.html" class="ghost-button">Game</a>
-      <a href="manage.html" class="accent-button active" aria-current="page">Manage Songs</a>
-    </nav>
+  <body class="rhythm-app">
+    <header class="app-header">
+      <nav class="surface app-nav" aria-label="Primary">
+        <menu class="buttons app-nav-menu">
+          <li><a href="index.html" class="button ghost ghost-button">Game</a></li>
+          <li><a href="manage.html" class="button accent-button active" aria-current="page">Manage Songs</a></li>
+        </menu>
+      </nav>
+    </header>
     <main>
-      <h1>Song Management</h1>
+      <header class="page-header">
+        <h1>Song Management</h1>
+      </header>
       
       <section id="upload-song" class="surface surface-plain">
-        <h2>Add New Song</h2>
+        <header class="section-header">
+          <h2>Add New Song</h2>
+        </header>
         <form id="upload-form" class="flex-gap">
           <label>
             <span class="label">Song ID</span>
@@ -37,23 +46,27 @@
             <input id="new-song-audio" type="file" accept="audio/*" required class="input-control" />
           </label>
           <button type="submit" class="accent-button">Upload</button>
-          <span id="upload-status" role="status" aria-live="polite"></span>
+          <output id="upload-status" role="status" aria-live="polite"></output>
         </form>
       </section>
 
       <section id="edit-song" class="surface surface-plain">
-        <h2>Select Song to Edit</h2>
+        <header class="section-header">
+          <h2>Select Song to Edit</h2>
+        </header>
         <div class="controls flex-gap">
           <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
             <option value="">Loading songs...</option>
           </select>
           <button id="btn-save-chart" class="accent-button">Save Chart</button>
-          <span id="save-status" role="status" aria-live="polite"></span>
+          <output id="save-status" role="status" aria-live="polite"></output>
         </div>
       </section>
 
-      <section id="song-editor" class="hidden surface surface-plain" aria-hidden="true">
-        <h2 id="editor-title">Editing</h2>
+      <section id="song-editor" class="hidden surface surface-plain" aria-hidden="true" aria-labelledby="editor-title">
+        <header class="section-header">
+          <h2 id="editor-title">Editing</h2>
+        </header>
         
         <div id="waveform-container">
           <div id="waveform"></div>
@@ -89,8 +102,8 @@
           <div id="timeline"></div>
           <div class="editor-controls">
             <button id="btn-play-pause" class="accent-button">Play</button>
-            <button id="btn-stop-playback" class="ghost-button" type="button">Stop</button>
-            <span id="audio-time">0:00 / 0:00</span>
+            <button id="btn-stop-playback" class="ghost ghost-button" type="button">Stop</button>
+            <output id="audio-time">0:00 / 0:00</output>
           </div>
         </div>
 
@@ -109,7 +122,7 @@
             </div>
             <div class="bpm-actions">
               <button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button>
-              <button id="btn-analyze-audio" type="button" class="ghost-button">Analyze Song</button>
+              <button id="btn-analyze-audio" type="button" class="ghost ghost-button">Analyze Song</button>
             </div>
           </fieldset>
         </div>

@@ -10,22 +10,31 @@
       href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Grotesk:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="vendor/oat.min.css" />
     <link rel="stylesheet" href="style.css" />
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
     <script src="spectral-waveform.js"></script>
   </head>
-  <body>
-    <nav class="center-content flex-gap">
-      <a href="index.html" class="active accent-button" aria-current="page">Game</a>
-      <a href="manage.html" class="ghost-button">Manage Songs</a>
-    </nav>
+  <body class="rhythm-app">
+    <header class="app-header">
+      <nav class="surface app-nav" aria-label="Primary">
+        <menu class="buttons app-nav-menu">
+          <li><a href="index.html" class="button accent-button active" aria-current="page">Game</a></li>
+          <li><a href="manage.html" class="button ghost ghost-button">Manage Songs</a></li>
+        </menu>
+      </nav>
+    </header>
     <main>
-      <h1>Rhythm Jump</h1>
+      <header class="page-header">
+        <h1>Rhythm Jump</h1>
+      </header>
       
       <section id="song-selection" class="surface surface-plain">
-        <h2>Choose Song</h2>
+        <header class="section-header">
+          <h2>Choose Song</h2>
+        </header>
         <div class="controls flex-gap">
           <select id="song-select" aria-label="Select Song" class="input-control">
             <option value="">Loading songs...</option>
@@ -36,7 +45,9 @@
       </section>
 
       <section id="waveform-section" class="surface surface-plain">
-        <h2>Waveform</h2>
+        <header class="section-header">
+          <h2>Waveform</h2>
+        </header>
         <div id="waveform-container">
           <div id="waveform"></div>
           <div class="waveform-composite">
@@ -74,55 +85,58 @@
         </div>
       </section>
 
-    <section id="visualization" class="surface surface-plain">
-      <canvas
-        id="visualizer"
-        width="960"
-        height="70"
-        aria-label="LED Strip Visualization"
-      ></canvas>
-      <div class="game-meta-row hint">
-        <span>Keyboard: A/Space (Left), L/Enter (Right)</span>
-        <span>Current: <span id="game-current-time">--</span></span>
-        <span>Length: <span id="game-track-length">--</span></span>
-      </div>
-    </section>
+      <section id="visualization" class="surface surface-plain">
+        <header class="section-header">
+          <h2>LED Preview</h2>
+        </header>
+        <canvas
+          id="visualizer"
+          width="960"
+          height="70"
+          aria-label="LED Strip Visualization"
+        ></canvas>
+        <p class="game-meta-row hint">
+          <span>Keyboard: A/Space (Left), L/Enter (Right)</span>
+          <span>Current: <span id="game-current-time">--</span></span>
+          <span>Length: <span id="game-track-length">--</span></span>
+        </p>
+      </section>
 
-    <div class="surface surface-plain debug-toggle-wrapper">
-      <button id="btn-toggle-debug" class="ghost-button" type="button">Hide overlay</button>
-    </div>
-
-    <section id="debug-panel" class="surface surface-plain debug-panel">
-      <div class="debug-header">
-        <h2>Debug Overlay</h2>
+      <div class="surface surface-plain debug-toggle-wrapper">
+        <button id="btn-toggle-debug" class="ghost ghost-button" type="button">Hide overlay</button>
       </div>
-      <div class="debug-body">
-        <div class="debug-row">
-          <div>
-            <span class="label">Remaining play time:</span>
-            <span id="debug-remaining-time">--</span>
+
+      <section id="debug-panel" class="surface surface-plain debug-panel" aria-labelledby="debug-overlay-title">
+        <header class="debug-header">
+          <h2 id="debug-overlay-title">Debug Overlay</h2>
+        </header>
+        <div class="debug-body">
+          <div class="debug-row">
+            <div>
+              <span class="label">Remaining play time:</span>
+              <span id="debug-remaining-time">--</span>
+            </div>
+            <div class="timing-windows">
+              <span class="label">Timing zones:</span>
+              <span id="debug-perfect-window">Perfect ±0 ms</span>
+              <span id="debug-good-window">Good ±0 ms</span>
+            </div>
           </div>
-          <div class="timing-windows">
-            <span class="label">Timing zones:</span>
-            <span id="debug-perfect-window">Perfect ±0 ms</span>
-            <span id="debug-good-window">Good ±0 ms</span>
+          <div class="lane-panels">
+            <section class="lane-panel" aria-labelledby="left-lane-title">
+              <h3 id="left-lane-title" class="lane-title">Left Lane</h3>
+              <div id="left-lane-log" class="timeline-list"></div>
+            </section>
+            <section class="lane-panel" aria-labelledby="right-lane-title">
+              <h3 id="right-lane-title" class="lane-title">Right Lane</h3>
+              <div id="right-lane-log" class="timeline-list"></div>
+            </section>
           </div>
         </div>
-        <div class="lane-panels">
-          <div class="lane-panel">
-            <div class="lane-title">Left Lane</div>
-            <div id="left-lane-log" class="timeline-list"></div>
-          </div>
-          <div class="lane-panel">
-            <div class="lane-title">Right Lane</div>
-            <div id="right-lane-log" class="timeline-list"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
-  <audio id="song-audio" preload="auto" hidden></audio>
-  <script src="visualizer-projection.js"></script>
-  <script src="game.js"></script>
+      </section>
+    </main>
+    <audio id="song-audio" preload="auto" hidden></audio>
+    <script src="visualizer-projection.js"></script>
+    <script src="game.js"></script>
   </body>
 </html>

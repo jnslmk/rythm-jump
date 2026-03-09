@@ -9,6 +9,25 @@
   --text-muted: #9ca2b9;
   --accent: #f6d03f;
   --border: #1f1f2c;
+  --background: var(--bg-base);
+  --foreground: var(--text-main);
+  --card: var(--surface);
+  --card-foreground: var(--text-main);
+  --primary: var(--accent);
+  --primary-foreground: #050508;
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: var(--text-main);
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: var(--text-muted);
+  --faint: rgba(255, 255, 255, 0.03);
+  --faint-foreground: var(--text-muted);
+  --border: #1f1f2c;
+  --input: #1f1f2c;
+  --ring: var(--accent);
+  --radius-medium: 0.75rem;
+  --radius-large: 1rem;
+  --font-sans: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', monospace;
 }
 
 body {
@@ -30,39 +49,52 @@ main {
 
 nav {
   width: 100%;
-  padding: 1rem 1.5rem;
-  margin: 1rem auto;
 }
 
-nav.surface {
+.app-header {
+  padding: 1rem 1.5rem 0;
+}
+
+.app-nav {
+  width: min(960px, 100%);
+  margin: 0 auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
   display: flex;
   justify-content: center;
-  gap: 0.5rem;
 }
 
-nav a {
+.app-nav-menu {
+  margin: 0;
+}
+
+.app-nav-menu > li {
+  margin: 0;
+}
+
+.app-nav-menu a.button {
   font-family: 'Press Start 2P', 'Space Grotesk', system-ui, sans-serif;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   font-size: 0.9rem;
   padding: 0.35rem 1rem;
-  border-radius: 999px;
-  text-decoration: none;
-  color: var(--text-main);
-  border: 1px solid transparent;
+  border-radius: 999px !important;
   transition: opacity 0.2s ease;
 }
 
-nav a.active {
+.app-nav-menu a.button.active {
   color: #050508;
   background: var(--accent);
 }
 
-nav a:hover {
+.app-nav-menu a.button:hover {
   opacity: 0.85;
+}
+
+.page-header,
+.section-header {
+  margin-bottom: 1rem;
 }
 
 h1,
@@ -377,14 +409,10 @@ textarea.input-control {
 
 .accent-button,
 .ghost-button {
-  padding: 0.75rem 1.25rem;
-  border-radius: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.15em;
   font-size: 0.85rem;
-  cursor: pointer;
-  transition: opacity 0.2s ease, transform 0.08s ease, filter 0.12s ease;
 }
 
 .accent-button {
@@ -397,11 +425,6 @@ textarea.input-control {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-main);
-}
-
-.accent-button:focus-visible,
-.ghost-button:focus-visible {
-  outline: 2px solid var(--accent);
 }
 
 .accent-button:hover:not(:disabled),
@@ -446,6 +469,7 @@ canvas {
   gap: 0.9rem 1.4rem;
   margin-top: 0.85rem;
   text-align: left;
+  margin-bottom: 0;
 }
 
 input[type='file'] {
