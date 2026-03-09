@@ -262,7 +262,7 @@ function ensureGameWaveformController() {
     getAnalysis: () => state.chart?.audio_analysis || null,
     getBeatTimesMs: () => state.chart?.audio_analysis?.beat_times_ms || [],
     getDurationMs: resolveWaveformDurationMs,
-    getProgressMs: () => state.sessionProgressMs,
+    getProgressMs: () => resolveCurrentPlaybackMs(state.sessionProgressMs),
     getRmsMax: () => state.spectralRmsMax,
     getZoom: () => state.waveformZoom || 1,
     onScroll: () => {
@@ -587,7 +587,7 @@ function scheduleGameBeatGridWindowRender() {
 }
 
 function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
-  ensureGameWaveformController()?.renderMain(progressMs);
+  ensureGameWaveformController()?.renderMain(resolveCurrentPlaybackMs(progressMs));
 }
 
 function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs) {
@@ -956,13 +956,14 @@ function setDebugVisibility(visible) {
   }
 }
 
-function resolveCurrentPlaybackMs() {
+function resolveCurrentPlaybackMs(fallbackMs = state.sessionProgressMs) {
   const audio = ensureAudioElement();
   const audioMs = audio ? audio.currentTime * 1000 : Number.NaN;
+  const fallbackProgressMs = Math.max(Number(fallbackMs) || 0, 0);
   if (Number.isFinite(audioMs) && audioMs >= 0) {
-    return audioMs;
+    return Math.max(audioMs, fallbackProgressMs);
   }
-  return Math.max(state.sessionProgressMs || 0, 0);
+  return fallbackProgressMs;
 }
 
 function renderGameMeta() {
