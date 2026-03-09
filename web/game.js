@@ -1,10 +1,8 @@
 const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
-const CLOCK_DECAY = 0.85;
 const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
-const HIT_EFFECT_DURATION_MS = 320;
 const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
 const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
@@ -35,17 +33,22 @@ function loadStoredGameWaveformZoom() {
   return stored;
 }
 
+function createLaneNoteResults() {
+  return { left: new Map(), right: new Map() };
+}
+
 let state = {
   songId: '',
   runStatus: 'idle',
   levels: [0, 0],
+  ledPixels: [],
   songs: [],
   activeBars: {},
-  hitEffects: { left: [], right: [] },
   triggerTimeline: { left: [], right: [] },
   pressTimeline: { left: [], right: [] },
   remainingMs: 0,
   sessionProgressMs: 0,
+  pendingStartSongId: null,
   chart: null,
   chartDurationMs: 0,
   spectralRmsMax: 1,
@@ -57,10 +60,10 @@ let state = {
   gameBeatSlotTimesMs: [],
   gameBeatSlotBaseGapMs: 1,
   gameNoteSlotSets: { left: new Set(), right: new Set() },
+  noteHitResults: createLaneNoteResults(),
 };
 
 let gameWaveSurfer = null;
-let visualizerEffectRafId = 0;
 let gameWaveformController = null;
 let gameWaveformRenderRafId = 0;
 let gamePlaybackRenderRafId = 0;
@@ -596,6 +599,12 @@ function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
   ensureGameWaveformController()?.renderMain(resolveCurrentPlaybackMs(progressMs));
 }
 
+function refreshGameTimingLayout() {
+  applyGameWaveformZoom({ preferExisting: true });
+  renderGameBeatGrid();
+  scheduleGameBeatGridWindowRender();
+}
+
 function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs) {
   pendingGameWaveformProgressMs = progressMs;
   if (gameWaveformRenderRafId) {
@@ -685,11 +694,13 @@ function judgePressTiming(lane) {
   const windows = state.chart?.judgement_windows_ms || { perfect: 0, good: 0 };
   const pressMs = getCurrentPlaybackProgressMs();
   let closestDeltaMs = null;
+  let closestNoteTimeMs = null;
 
   for (const noteTimeMs of notes) {
     const deltaMs = pressMs - Number(noteTimeMs || 0);
     if (closestDeltaMs === null || Math.abs(deltaMs) < Math.abs(closestDeltaMs)) {
       closestDeltaMs = deltaMs;
+      closestNoteTimeMs = Number(noteTimeMs || 0);
     }
   }
 
@@ -698,97 +709,112 @@ function judgePressTiming(lane) {
       deltaMs: null,
       judgement: 'off',
       pressMs,
+      noteTimeMs: null,
       triggerHit: false
     };
   }
 
   const absoluteDeltaMs = Math.abs(closestDeltaMs);
   if (absoluteDeltaMs <= windows.perfect) {
-    return { deltaMs: closestDeltaMs, judgement: 'perfect', pressMs, triggerHit: true };
+    return {
+      deltaMs: closestDeltaMs,
+      judgement: 'perfect',
+      pressMs,
+      noteTimeMs: closestNoteTimeMs,
+      triggerHit: true
+    };
   }
   if (absoluteDeltaMs <= windows.good) {
-    return { deltaMs: closestDeltaMs, judgement: 'good', pressMs, triggerHit: true };
+    return {
+      deltaMs: closestDeltaMs,
+      judgement: 'good',
+      pressMs,
+      noteTimeMs: closestNoteTimeMs,
+      triggerHit: true
+    };
   }
-  return { deltaMs: closestDeltaMs, judgement: 'off', pressMs, triggerHit: false };
+  return {
+    deltaMs: closestDeltaMs,
+    judgement: 'off',
+    pressMs,
+    noteTimeMs: closestNoteTimeMs,
+    triggerHit: false
+  };
 }
 
-function pruneHitEffects(now = performance.now()) {
-  for (const lane of ['left', 'right']) {
-    state.hitEffects[lane] = state.hitEffects[lane].filter(
-      (effect) => (now - effect.createdAt) < HIT_EFFECT_DURATION_MS
-    );
-  }
+function getNoteResultKey(noteTimeMs) {
+  return String(Math.round(Number(noteTimeMs) || 0));
 }
 
-function hasActiveHitEffects() {
-  return state.hitEffects.left.length > 0 || state.hitEffects.right.length > 0;
-}
-
-function hasActiveBarAnimations() {
-  return Object.keys(state.activeBars).length > 0 && isSessionPlaying();
-}
-
-function scheduleVisualizerEffectRender() {
-  if (visualizerEffectRafId) {
+function recordLaneNoteResult(lane, noteTimeMs, judgement) {
+  if (!lane || !Number.isFinite(noteTimeMs) || !state.noteHitResults[lane]) {
     return;
   }
-  visualizerEffectRafId = window.requestAnimationFrame(() => {
-    visualizerEffectRafId = 0;
-    renderVisualizer();
-    if (hasActiveHitEffects() || hasActiveBarAnimations()) {
-      scheduleVisualizerEffectRender();
-    }
-  });
+  const resultKey = getNoteResultKey(noteTimeMs);
+  if (state.noteHitResults[lane].has(resultKey)) {
+    return;
+  }
+  state.noteHitResults[lane].set(resultKey, judgement);
 }
 
-function addHitEffect(lane, judgement) {
-  state.hitEffects[lane].push({
-    createdAt: performance.now(),
-    judgement
-  });
-  renderVisualizer();
-  scheduleVisualizerEffectRender();
+function getLaneNoteResult(lane, noteTimeMs, playbackMs) {
+  const resultKey = getNoteResultKey(noteTimeMs);
+  const stored = state.noteHitResults[lane]?.get(resultKey);
+  if (stored) {
+    return stored;
+  }
+
+  const missWindowMs = Number(state.chart?.judgement_windows_ms?.good) || 0;
+  if (playbackMs > (Number(noteTimeMs) || 0) + missWindowMs) {
+    return 'miss';
+  }
+
+  return 'pending';
 }
 
-function getMovingBarLedSpan(numLeds) {
-  const travelMs = Math.max(Number(state.chart?.travel_time_ms) || 0, 1);
-  const slotTimes = state.gameBeatSlots.map((slot) => slot.timeMs);
-  let minGapMs = Infinity;
-  for (let index = 1; index < slotTimes.length; index += 1) {
-    const gapMs = slotTimes[index] - slotTimes[index - 1];
-    if (gapMs > 0) {
-      minGapMs = Math.min(minGapMs, gapMs);
-    }
-  }
-  const halfStripLeds = Math.max(Math.floor(numLeds / 2) - 2, 2);
-  const projectedGapLeds = Number.isFinite(minGapMs)
-    ? Math.floor((minGapMs / travelMs) * halfStripLeds) - 1
-    : 6;
-  return Math.max(2, Math.min(8, projectedGapLeds));
-}
-
-function reduceStreamLevels(levels, event) {
-  if (event.type === 'led_frame' && Array.isArray(event.levels)) {
-    return event.levels.map(clampLevel);
+function renderLedBeatFeedback() {
+  const container = document.getElementById('led-beat-feedback');
+  if (!container) {
+    return;
   }
 
-  if (event.type === 'lane_event') {
-    const isLeft = event.lane === 'left';
-    const isRight = event.lane === 'right';
-    
-    if (isLeft) {
-      return [1, levels[1]];
-    }
-    if (isRight) {
-      return [levels[0], 1];
-    }
+  const leftNotes = getLaneHitNotes('left');
+  const rightNotes = getLaneHitNotes('right');
+  if (!leftNotes.length && !rightNotes.length) {
+    container.innerHTML = '<div class="led-beat-feedback-empty">Beat feedback appears after a chart loads.</div>';
+    return;
   }
 
-  if (event.type === 'clock_tick') {
-    return [clampLevel(levels[0] * CLOCK_DECAY), clampLevel(levels[1] * CLOCK_DECAY)];
-  }
+  const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+  const playbackMs = resolveCurrentPlaybackMs();
+  const rows = [
+    { lane: 'left', label: 'L', notes: leftNotes },
+    { lane: 'right', label: 'R', notes: rightNotes },
+  ];
 
-  return levels;
+  container.innerHTML = rows.map(({ lane, label, notes }) => {
+    const markers = notes.map((noteTimeMs) => {
+      const leftPercent = Math.max(
+        0,
+        Math.min(((Number(noteTimeMs) || 0) / durationMs) * 100, 100)
+      );
+      const result = getLaneNoteResult(lane, noteTimeMs, playbackMs);
+      return `
+        <span
+          class="led-beat-feedback-marker ${result}"
+          style="left: ${leftPercent.toFixed(3)}%;"
+          title="${lane} @ ${formatMs(noteTimeMs)}: ${result}"
+        ></span>
+      `;
+    }).join('');
+
+    return `
+      <div class="led-beat-feedback-row" data-lane="${lane}">
+        <span class="led-beat-feedback-label">${label}</span>
+        <div class="led-beat-feedback-track">${markers}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderVisualizer() {
@@ -801,18 +827,33 @@ function renderVisualizer() {
   const height = canvas.height;
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, width, height);
 
   const numLeds = 70;
   const ledWidth = (width - 20) / numLeds;
   const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
-  pruneHitEffects();
   ctx.drawImage(getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight), 0, 0);
+  renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth);
+  renderLedBeatFeedback();
+}
 
-  renderBars(ctx, width, ledY, ledHeight, numLeds, ledWidth);
-  renderHitEffects(ctx, ledY, ledHeight, numLeds, ledWidth);
+function renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth) {
+  if (!Array.isArray(state.ledPixels) || state.ledPixels.length === 0) {
+    return;
+  }
+
+  for (let index = 0; index < Math.min(state.ledPixels.length, numLeds); index += 1) {
+    const pixel = state.ledPixels[index];
+    if (!Array.isArray(pixel) || pixel.length !== 3) {
+      continue;
+    }
+    const [red, green, blue] = pixel.map((value) => Math.max(0, Math.min(255, Number(value) || 0)));
+    if (red === 0 && green === 0 && blue === 0) {
+      continue;
+    }
+    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+    ctx.fillRect(10 + index * ledWidth, ledY, ledWidth - 2, ledHeight);
+  }
 }
 
 function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight) {
@@ -832,8 +873,6 @@ function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, l
 
   const backgroundCtx = visualizerBackgroundCanvas.getContext('2d');
   backgroundCtx.clearRect(0, 0, width, height);
-  backgroundCtx.fillStyle = '#0f172a';
-  backgroundCtx.fillRect(0, 0, width, height);
 
   for (let i = 0; i < numLeds; i += 1) {
     backgroundCtx.fillStyle = i < numLeds / 2
@@ -843,92 +882,6 @@ function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, l
   }
 
   return visualizerBackgroundCanvas;
-}
-
-function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
-  void canvasWidth;
-  const barSpan = getMovingBarLedSpan(numLeds);
-  const barHeight = ledHeight + 6;
-  const barY = Math.max(ledY - 3, 0);
-  const nowMs = performance.now();
-  Object.values(state.activeBars).forEach((bar) => {
-    const travelMs = bar.travel_time_ms || 1;
-    const progressMs = VisualizerProjection.getAnimatedBarProgressMs(
-      bar.progress_ms,
-      bar.received_at_ms,
-      nowMs,
-      travelMs
-    );
-    const ratio = Math.min(Math.max(progressMs / travelMs, 0), 1);
-    const ledRange = VisualizerProjection.getRenderedBarRange(
-      numLeds,
-      ratio,
-      bar.lane,
-      barSpan
-    );
-    if (!ledRange) {
-      return;
-    }
-
-    const fillColor = bar.lane === 'left'
-      ? 'rgba(125, 211, 252, 1)'
-      : 'rgba(251, 113, 133, 1)';
-    const strokeColor = bar.lane === 'left'
-      ? 'rgba(224, 242, 254, 0.95)'
-      : 'rgba(255, 228, 230, 0.95)';
-    const startX = 10 + (ledRange.startIndex * ledWidth);
-    const barWidth = ((ledRange.endIndex - ledRange.startIndex + 1) * ledWidth) - 1;
-
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = fillColor;
-    ctx.fillStyle = fillColor;
-    ctx.fillRect(startX, barY, barWidth, barHeight);
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(startX + 0.75, barY + 0.75, Math.max(barWidth - 1.5, 1), Math.max(barHeight - 1.5, 1));
-  });
-  ctx.shadowBlur = 0;
-  ctx.shadowColor = 'transparent';
-}
-
-function getJudgementEffectColor(judgement, alpha) {
-  if (judgement === 'perfect') {
-    return `rgba(250, 204, 21, ${alpha})`;
-  }
-  if (judgement === 'good') {
-    return `rgba(74, 222, 128, ${alpha})`;
-  }
-  return `rgba(248, 113, 113, ${alpha})`;
-}
-
-function renderHitEffects(ctx, ledY, ledHeight, numLeds, ledWidth) {
-  const centerLeftIndex = Math.floor((numLeds / 2) - 1);
-  const centerRightIndex = centerLeftIndex + 1;
-  const baseSpan = 4;
-  const now = performance.now();
-
-  for (const lane of ['left', 'right']) {
-    state.hitEffects[lane].forEach((effect) => {
-      const ageMs = now - effect.createdAt;
-      const ageRatio = Math.max(0, Math.min(ageMs / HIT_EFFECT_DURATION_MS, 1));
-      const spread = Math.round(ageRatio * 3);
-      const alpha = 1 - ageRatio;
-      const anchorIndex = lane === 'left' ? centerLeftIndex - 1 : centerRightIndex + 1;
-      const startIndex = lane === 'left'
-        ? Math.max(0, anchorIndex - baseSpan - spread + 1)
-        : Math.max(0, anchorIndex - spread);
-      const endIndex = lane === 'left'
-        ? Math.min(numLeds - 1, anchorIndex + spread)
-        : Math.min(numLeds - 1, anchorIndex + baseSpan + spread - 1);
-
-      for (let ledIndex = startIndex; ledIndex <= endIndex; ledIndex += 1) {
-        const x = 10 + ledIndex * ledWidth;
-        ctx.fillStyle = getJudgementEffectColor(effect.judgement, alpha);
-        ctx.fillRect(x, ledY, ledWidth - 2, ledHeight);
-      }
-    });
-  }
 }
 
 function renderTimelineList(containerId, entries, formatter) {
@@ -1008,11 +961,10 @@ function setDebugVisibility(visible) {
 function resolveCurrentPlaybackMs(fallbackMs = state.sessionProgressMs) {
   const audio = ensureAudioElement();
   const audioMs = audio ? audio.currentTime * 1000 : Number.NaN;
-  const fallbackProgressMs = Math.max(Number(fallbackMs) || 0, 0);
   if (Number.isFinite(audioMs) && audioMs >= 0) {
-    return Math.max(audioMs, fallbackProgressMs);
+    return audioMs;
   }
-  return fallbackProgressMs;
+  return Math.max(Number(fallbackMs) || 0, 0);
 }
 
 function renderGameMeta() {
@@ -1025,6 +977,8 @@ function renderGameMeta() {
   if (trackLengthEl) {
     trackLengthEl.textContent = formatPlaybackTime(resolveWaveformDurationMs());
   }
+
+  renderLedBeatFeedback();
 }
 
 function renderDebugPanel() {
@@ -1086,7 +1040,6 @@ function handleBarFrame(payload) {
   state.remainingMs = Math.max(payload.remaining_ms, 0);
   renderVisualizer();
   renderDebugPanel();
-  scheduleVisualizerEffectRender();
 }
 
 function recordButtonPress(lane) {
@@ -1100,15 +1053,19 @@ function recordButtonPress(lane) {
     triggerHit: judgementResult.triggerHit,
   };
   pushTimelineEntry(state.pressTimeline, lane, entry);
-  addHitEffect(lane, judgementResult.judgement);
+  if (judgementResult.triggerHit && Number.isFinite(judgementResult.noteTimeMs)) {
+    recordLaneNoteResult(lane, judgementResult.noteTimeMs, judgementResult.judgement);
+  }
+  renderLedBeatFeedback();
   renderDebugPanel();
 }
 
 function resetSessionState() {
   stopAudioPlayback();
   state.activeBars = {};
-  state.hitEffects.left = [];
-  state.hitEffects.right = [];
+  state.ledPixels = [];
+  state.pendingStartSongId = null;
+  state.noteHitResults = createLaneNoteResults();
   state.triggerTimeline.left = [];
   state.triggerTimeline.right = [];
   state.pressTimeline.left = [];
@@ -1116,10 +1073,6 @@ function resetSessionState() {
   state.remainingMs = 0;
   state.sessionProgressMs = 0;
   state.sessionStartMs = null;
-  if (visualizerEffectRafId) {
-    window.cancelAnimationFrame(visualizerEffectRafId);
-    visualizerEffectRafId = 0;
-  }
   stopGamePlaybackRenderLoop();
   if (gameWaveformRenderRafId) {
     window.cancelAnimationFrame(gameWaveformRenderRafId);
@@ -1169,6 +1122,9 @@ function connectWebSocket() {
 
       if (payload.type === 'led_frame' && Array.isArray(payload.levels)) {
         state.levels = payload.levels.map(clampLevel);
+        if (Array.isArray(payload.pixels)) {
+          state.ledPixels = payload.pixels;
+        }
         if (typeof payload.progress_ms === 'number') {
           state.sessionProgressMs = payload.progress_ms;
           if (state.chartDurationMs > 0) {
@@ -1177,6 +1133,9 @@ function connectWebSocket() {
               0
             );
           }
+        }
+        if (state.pendingStartSongId && isSessionPlaying()) {
+          void startPendingAudioPlayback(state.sessionProgressMs);
         }
         scheduleGameSpectralWaveformRender(state.sessionProgressMs);
         renderVisualizer();
@@ -1189,8 +1148,6 @@ function connectWebSocket() {
         return;
       }
 
-      state.levels = reduceStreamLevels(state.levels, payload);
-      renderVisualizer();
     } catch (e) {
       console.error('WS Error:', e);
     }
@@ -1235,8 +1192,9 @@ async function loadChart(songId) {
       throw new Error('failed to load chart');
     }
     const chartData = await response.json();
-    state.chart = chartData;
-    ensureGameWaveformController()?.invalidateOverviewCache();
+  state.chart = chartData;
+  state.noteHitResults = createLaneNoteResults();
+  ensureGameWaveformController()?.invalidateOverviewCache();
     state.chartDurationMs = computeTrackDuration(chartData);
     const descriptors = chartData?.audio_analysis?.beat_descriptors;
     if (Array.isArray(descriptors) && descriptors.length > 0) {
@@ -1254,6 +1212,7 @@ async function loadChart(songId) {
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
     scheduleGameSpectralWaveformRender(0);
+    renderLedBeatFeedback();
     renderDebugPanel();
   } catch (error) {
     console.error('Failed to load chart:', error);
@@ -1310,6 +1269,21 @@ async function startAudioPlayback(songId, startMs = 0) {
   }
 }
 
+async function startPendingAudioPlayback(progressMs = 0) {
+  if (!state.pendingStartSongId) return;
+
+  const songId = state.pendingStartSongId;
+  state.pendingStartSongId = null;
+
+  try {
+    await startAudioPlayback(songId, progressMs);
+  } catch (error) {
+    console.error('Playback failed', error);
+    state.runStatus = 'Playback blocked';
+    updateUI();
+  }
+}
+
 function init() {
   const startButton = document.getElementById('btn-start');
   if (startButton) {
@@ -1338,16 +1312,8 @@ function init() {
         state.sessionStartMs = Date.now();
         state.sessionProgressMs = 0;
         state.remainingMs = state.chartDurationMs;
+        state.pendingStartSongId = songId;
         renderDebugPanel();
-
-        try {
-          await startAudioPlayback(songId, 0);
-        } catch (error) {
-          console.error('Playback failed', error);
-          state.runStatus = 'Playback blocked';
-          updateUI();
-          return;
-        }
 
         socket.send(JSON.stringify({
           type: 'start_session',
@@ -1378,7 +1344,14 @@ function init() {
   });
 
   const audio = ensureAudioElement();
-  ['loadedmetadata', 'timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
+  ['loadedmetadata', 'durationchange'].forEach((eventName) => {
+    audio.addEventListener(eventName, () => {
+      refreshGameTimingLayout();
+      renderGameMeta();
+      scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
+    });
+  });
+  ['timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
       renderGameMeta();
       scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());

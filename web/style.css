@@ -573,6 +573,64 @@ textarea {
   text-align: center;
 }
 
+.led-beat-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: min(960px, 100%);
+  margin: 0.75rem auto 0;
+}
+
+.led-beat-feedback-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.led-beat-feedback-label {
+  font-family: 'Press Start 2P', 'Space Grotesk', sans-serif;
+  font-size: 0.58rem;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+}
+
+.led-beat-feedback-track {
+  position: relative;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.led-beat-feedback-marker {
+  position: absolute;
+  top: 50%;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: rgba(148, 163, 184, 0.36);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.8);
+}
+
+.led-beat-feedback-marker.perfect {
+  background: #fde047;
+}
+
+.led-beat-feedback-marker.good {
+  background: #86efac;
+}
+
+.led-beat-feedback-marker.miss {
+  background: #f87171;
+}
+
+.led-beat-feedback-empty {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 #waveform-container {
   margin: 1.5rem 0;
   border-radius: 1rem;
@@ -768,14 +826,17 @@ textarea {
 
 .timeline-list {
   min-height: 110px;
+  max-height: 18rem;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 0.75rem;
   padding: 0.65rem;
   background: rgba(15, 23, 42, 0.45);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  scrollbar-width: thin;
 }
 
 .timeline-entry {
