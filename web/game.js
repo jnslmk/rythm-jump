@@ -845,8 +845,10 @@ function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   const barSpan = getMovingBarLedSpan(numLeds);
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
-    const progressMs = Math.min(
-      Math.max(Number(bar.progress_ms) || 0, 0),
+    const progressMs = VisualizerProjection.getAnimatedBarProgressMs(
+      bar.progress_ms,
+      bar.playback_anchor_ms,
+      resolveCurrentPlaybackMs(bar.playback_anchor_ms),
       travelMs
     );
     const ratio = Math.min(Math.max(progressMs / travelMs, 0), 1);
@@ -1037,7 +1039,10 @@ function renderDebugPanel() {
 
 function handleBarFrame(payload) {
   const key = `${payload.lane}-${payload.hit_time_ms}`;
-  state.activeBars[key] = payload;
+  state.activeBars[key] = {
+    ...payload,
+    playback_anchor_ms: resolveCurrentPlaybackMs(payload.progress_ms),
+  };
 
   if (payload.progress_ms >= payload.travel_time_ms) {
     window.setTimeout(() => {

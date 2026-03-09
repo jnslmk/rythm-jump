@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getAnimatedBarProgressMs,
   getPlaybackAlignedBarProgressMs,
   getRenderedBarRange,
   projectBarHeadIndex,
@@ -38,4 +39,12 @@ test('playback-aligned progress matches the audio clock', () => {
 
 test('playback-aligned progress falls back to server progress without audio time', () => {
   assert.equal(getPlaybackAlignedBarProgressMs(1000, 400, Number.NaN, 125), 125);
+});
+
+test('animated bar progress advances from the last backend progress anchor', () => {
+  assert.equal(getAnimatedBarProgressMs(250, 1000, 1125, 400), 375);
+});
+
+test('animated bar progress falls back to backend progress without playback anchor', () => {
+  assert.equal(getAnimatedBarProgressMs(250, Number.NaN, 1125, 400), 250);
 });

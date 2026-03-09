@@ -82,7 +82,24 @@
     return Math.min(Math.max(safePlaybackMs - spawnMs, 0), safeTravelMs);
   }
 
+  function getAnimatedBarProgressMs(baseProgressMs, anchorPlaybackMs, currentPlaybackMs, travelTimeMs) {
+    const safeTravelMs = Math.max(Number(travelTimeMs) || 0, 1);
+    const safeBaseProgressMs = Math.min(
+      Math.max(Number(baseProgressMs) || 0, 0),
+      safeTravelMs
+    );
+    const safeAnchorPlaybackMs = Number(anchorPlaybackMs);
+    const safeCurrentPlaybackMs = Number(currentPlaybackMs);
+    if (!Number.isFinite(safeAnchorPlaybackMs) || !Number.isFinite(safeCurrentPlaybackMs)) {
+      return safeBaseProgressMs;
+    }
+
+    const elapsedSinceAnchorMs = Math.max(safeCurrentPlaybackMs - safeAnchorPlaybackMs, 0);
+    return Math.min(safeBaseProgressMs + elapsedSinceAnchorMs, safeTravelMs);
+  }
+
   return {
+    getAnimatedBarProgressMs,
     getPlaybackAlignedBarProgressMs,
     getRenderedBarRange,
     projectBarHeadIndex,
