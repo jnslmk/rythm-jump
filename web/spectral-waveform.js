@@ -644,6 +644,9 @@
         global.removeEventListener('mousemove', onWindowMouseMove);
         global.removeEventListener('mouseup', onWindowMouseUp);
       });
+
+      updateVisibleWindowRatios(scrollContainer);
+      scheduleOverviewRender(getProgressMs());
     }
 
     function detach() {

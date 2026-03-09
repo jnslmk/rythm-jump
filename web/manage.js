@@ -448,6 +448,7 @@ function applyWaveformZoom() {
   ensureManageWaveformController();
   const spectralWaveform = document.getElementById('manage-spectral-waveform');
   const beatGrid = document.getElementById('zoom-beat-grid');
+  const scrollContainer = document.getElementById('spectral-waveform-scroll');
   if (!spectralWaveform) {
     return;
   }
@@ -459,6 +460,8 @@ function applyWaveformZoom() {
   if (beatGrid) {
     beatGrid.style.width = widthPercent;
   }
+
+  updateVisibleWaveformWindowRatios(scrollContainer);
 
   // WaveSurfer zoom is in pixels/second and 0 is fully zoomed out.
   if (wavesurfer?.zoom) {
