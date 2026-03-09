@@ -82,19 +82,19 @@
     return Math.min(Math.max(safePlaybackMs - spawnMs, 0), safeTravelMs);
   }
 
-  function getAnimatedBarProgressMs(baseProgressMs, anchorPlaybackMs, currentPlaybackMs, travelTimeMs) {
+  function getAnimatedBarProgressMs(baseProgressMs, anchorTimeMs, currentTimeMs, travelTimeMs) {
     const safeTravelMs = Math.max(Number(travelTimeMs) || 0, 1);
     const safeBaseProgressMs = Math.min(
       Math.max(Number(baseProgressMs) || 0, 0),
       safeTravelMs
     );
-    const safeAnchorPlaybackMs = Number(anchorPlaybackMs);
-    const safeCurrentPlaybackMs = Number(currentPlaybackMs);
-    if (!Number.isFinite(safeAnchorPlaybackMs) || !Number.isFinite(safeCurrentPlaybackMs)) {
+    const safeAnchorTimeMs = Number(anchorTimeMs);
+    const safeCurrentTimeMs = Number(currentTimeMs);
+    if (!Number.isFinite(safeAnchorTimeMs) || !Number.isFinite(safeCurrentTimeMs)) {
       return safeBaseProgressMs;
     }
 
-    const elapsedSinceAnchorMs = Math.max(safeCurrentPlaybackMs - safeAnchorPlaybackMs, 0);
+    const elapsedSinceAnchorMs = Math.max(safeCurrentTimeMs - safeAnchorTimeMs, 0);
     return Math.min(safeBaseProgressMs + elapsedSinceAnchorMs, safeTravelMs);
   }
 

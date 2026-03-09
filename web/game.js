@@ -843,12 +843,13 @@ function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, l
 function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   void canvasWidth;
   const barSpan = getMovingBarLedSpan(numLeds);
+  const nowMs = performance.now();
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
     const progressMs = VisualizerProjection.getAnimatedBarProgressMs(
       bar.progress_ms,
-      bar.playback_anchor_ms,
-      resolveCurrentPlaybackMs(bar.playback_anchor_ms),
+      bar.received_at_ms,
+      nowMs,
       travelMs
     );
     const ratio = Math.min(Math.max(progressMs / travelMs, 0), 1);
@@ -1044,7 +1045,7 @@ function handleBarFrame(payload) {
   state.activeBars[key] = {
     ...payload,
     progress_ms: progressMs,
-    playback_anchor_ms: Math.max((Number(payload.hit_time_ms) || 0) - travelMs + progressMs, 0),
+    received_at_ms: performance.now(),
   };
 
   if (progressMs >= travelMs) {
