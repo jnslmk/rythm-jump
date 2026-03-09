@@ -5,15 +5,10 @@ const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
 const HIT_EFFECT_DURATION_MS = 320;
-const MIN_SPECTRAL_RMS = 0.001;
+const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
 const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
 const GAME_NOTE_SNAP_MAX_MS = 180;
-const WAVEFORM_BAND_LAYERS = [
-  { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 },
-  { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 },
-  { alpha: 0.82, color: 'rgba(14, 165, 233, 0.74)', gain: 1.25 }
-];
 
 const KEY_MAPPING = {
   a: 'left',
@@ -62,12 +57,8 @@ let state = {
 };
 
 let gameWaveSurfer = null;
-let isGameWaveformDragging = false;
-let gameWaveformDragStartX = 0;
-let gameWaveformDragStartLeft = 0;
-let gameWaveformDragTargetLeft = 0;
-let gameWaveformDragRafId = 0;
 let visualizerEffectRafId = 0;
+let gameWaveformController = null;
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
@@ -85,11 +76,13 @@ function updateControlStates() {
 
   if (startBtn) {
     startBtn.textContent = playing ? 'Pause Game' : (paused ? 'Resume Game' : 'Start Game');
-    startBtn.classList.toggle('ghost-button', playing || paused);
-    startBtn.classList.toggle('accent-button', !playing && !paused);
+    startBtn.classList.add('accent-button');
+    startBtn.classList.remove('ghost-button');
   }
 
   if (stopBtn) {
+    stopBtn.classList.add('ghost-button');
+    stopBtn.classList.remove('accent-button');
     stopBtn.disabled = !playing && !paused;
   }
 }
@@ -147,7 +140,7 @@ function initGameWaveform() {
 
   gameWaveSurfer = WaveSurfer.create(config);
   gameWaveSurfer.on('ready', () => {
-    applyGameWaveformZoom();
+    applyGameWaveformZoom({ preferExisting: true });
     renderGameSpectralWaveform();
   });
   gameWaveSurfer.on('audioprocess', () => {
@@ -169,6 +162,16 @@ function formatMs(value) {
     return '--';
   }
   return `${(value / 1000).toFixed(2)}s`;
+}
+
+function formatPlaybackTime(value) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    return '--';
+  }
+  const totalSeconds = Math.floor(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function computeChartDuration(chart) {
@@ -195,30 +198,50 @@ function resolveWaveformDurationMs() {
   return 1;
 }
 
+function ensureGameWaveformController() {
+  if (gameWaveformController || !window.SpectralWaveform) {
+    return gameWaveformController;
+  }
+
+  gameWaveformController = window.SpectralWaveform.createController({
+    canvas: '#game-spectral-waveform',
+    scrollContainer: '#game-spectral-waveform-scroll',
+    overviewCanvas: '#game-spectral-waveform-overview',
+    emptyMessage: 'Run Analyze Song in Manage Songs to generate colors.',
+    getAnalysis: () => state.chart?.audio_analysis || null,
+    getBeatTimesMs: () => state.chart?.audio_analysis?.beat_times_ms || [],
+    getDurationMs: resolveWaveformDurationMs,
+    getProgressMs: () => state.sessionProgressMs,
+    getRmsMax: () => state.spectralRmsMax,
+    getZoom: () => state.waveformZoom || 1,
+    onVisibleWindowChange: (ratios) => {
+      state.visibleWaveformWindowRatios = ratios;
+    },
+    shouldAutoFollow: () => isSessionPlaying(),
+    showTimeAxis: true
+  });
+  gameWaveformController.attach();
+  return gameWaveformController;
+}
+
 function getGameWaveformZoom() {
   const durationMs = Math.max(resolveWaveformDurationMs(), 1);
   return Math.max(GAME_WAVEFORM_ZOOM_MIN, durationMs / GAME_WAVEFORM_TARGET_WINDOW_MS);
 }
 
 function updateVisibleWaveformWindowRatios(scrollContainer) {
-  if (!scrollContainer) {
+  const controller = ensureGameWaveformController();
+  if (!controller) {
     state.visibleWaveformWindowRatios = { start: 0, end: 1 };
     return state.visibleWaveformWindowRatios;
   }
-  const totalWidth = Math.max(scrollContainer.scrollWidth, 1);
-  const viewportWidth = Math.max(scrollContainer.clientWidth, 1);
-  const maxLeft = Math.max(totalWidth - viewportWidth, 0);
-  const left = Math.max(0, Math.min(scrollContainer.scrollLeft, maxLeft));
-  const right = Math.max(left, Math.min(left + viewportWidth, totalWidth));
-  state.visibleWaveformWindowRatios = {
-    start: left / totalWidth,
-    end: right / totalWidth
-  };
+  state.visibleWaveformWindowRatios = controller.updateVisibleWindowRatios(scrollContainer);
   return state.visibleWaveformWindowRatios;
 }
 
 function applyGameWaveformZoom(options = {}) {
   const preferExisting = options.preferExisting === true;
+  ensureGameWaveformController();
   const spectralWaveform = document.getElementById('game-spectral-waveform');
   const beatGrid = document.getElementById('game-zoom-beat-grid');
   const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
@@ -226,9 +249,8 @@ function applyGameWaveformZoom(options = {}) {
     return;
   }
   const computedZoom = getGameWaveformZoom();
-  const hasComputedDuration = computedZoom > GAME_WAVEFORM_ZOOM_MIN;
-  state.waveformZoom = (preferExisting && !hasComputedDuration)
-    ? Math.max(state.waveformZoom, GAME_WAVEFORM_ZOOM_MIN)
+  state.waveformZoom = preferExisting
+    ? Math.max(state.waveformZoom, computedZoom, GAME_WAVEFORM_ZOOM_MIN)
     : computedZoom;
   localStorage.setItem(
     GAME_WAVEFORM_ZOOM_STORAGE_KEY,
@@ -240,6 +262,7 @@ function applyGameWaveformZoom(options = {}) {
     beatGrid.style.width = widthPercent;
   }
   updateVisibleWaveformWindowRatios(scrollContainer);
+  renderGameSpectralWaveform();
 }
 
 function getSortedBeatTimesMs() {
@@ -445,220 +468,8 @@ function renderGameBeatGrid() {
   beatGrid.appendChild(fragment);
 }
 
-function startGameWaveformDrag(event) {
-  if (event.button !== 0) {
-    return;
-  }
-  const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
-  if (!scrollContainer) {
-    return;
-  }
-  isGameWaveformDragging = true;
-  gameWaveformDragStartX = event.clientX;
-  gameWaveformDragStartLeft = scrollContainer.scrollLeft;
-  scrollContainer.classList.add('dragging');
-  event.preventDefault();
-}
-
-function handleGameWaveformDragMove(event) {
-  if (!isGameWaveformDragging) {
-    return;
-  }
-  const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
-  if (!scrollContainer) {
-    return;
-  }
-  const dragDelta = event.clientX - gameWaveformDragStartX;
-  gameWaveformDragTargetLeft = gameWaveformDragStartLeft - dragDelta;
-  if (gameWaveformDragRafId) {
-    return;
-  }
-  gameWaveformDragRafId = window.requestAnimationFrame(() => {
-    gameWaveformDragRafId = 0;
-    scrollContainer.scrollLeft = gameWaveformDragTargetLeft;
-    updateVisibleWaveformWindowRatios(scrollContainer);
-  });
-}
-
-function stopGameWaveformDrag() {
-  if (!isGameWaveformDragging) {
-    return;
-  }
-  isGameWaveformDragging = false;
-  if (gameWaveformDragRafId) {
-    window.cancelAnimationFrame(gameWaveformDragRafId);
-    gameWaveformDragRafId = 0;
-  }
-  const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
-  if (scrollContainer) {
-    scrollContainer.classList.remove('dragging');
-    updateVisibleWaveformWindowRatios(scrollContainer);
-  }
-}
-
-function drawSpectralTimeAxis(ctx, width, height, durationMs) {
-  const axisY = height - 16;
-  const labelY = height - 4;
-  const tickCount = 8;
-
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, axisY);
-  ctx.lineTo(width, axisY);
-  ctx.stroke();
-
-  ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
-  ctx.font = "10px 'Space Grotesk', sans-serif";
-  for (let i = 0; i <= tickCount; i += 1) {
-    const ratio = i / tickCount;
-    const x = ratio * width;
-    const seconds = ((durationMs * ratio) / 1000).toFixed(1);
-    ctx.beginPath();
-    ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + 4);
-    ctx.stroke();
-    ctx.fillText(`${seconds}s`, Math.min(x + 2, width - 26), labelY);
-  }
-}
-
-function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
-  if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
-    return;
-  }
-  for (let i = 0; i < beatTimesMs.length; i += 1) {
-    const beatMs = Number(beatTimesMs[i]) || 0;
-    const x = (beatMs / durationMs) * width;
-    const isBarStart = i % 4 === 0;
-    ctx.strokeStyle = isBarStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
-    ctx.lineWidth = isBarStart ? 2 : 1;
-    ctx.beginPath();
-    ctx.moveTo(x, 2);
-    ctx.lineTo(x, axisY);
-    ctx.stroke();
-  }
-}
-
-function sampleEnvelopeValue(series, x, width) {
-  if (!Array.isArray(series) || series.length === 0 || width <= 0) {
-    return 0;
-  }
-  const seriesLen = series.length;
-  const start = Math.floor((x / width) * seriesLen);
-  let end = Math.floor(((x + 1) / width) * seriesLen);
-  if (end <= start) {
-    end = start + 1;
-  }
-
-  let maxValue = 0;
-  for (let i = start; i < end && i < seriesLen; i += 1) {
-    const value = Number(series[i]) || 0;
-    if (value > maxValue) {
-      maxValue = value;
-    }
-  }
-  return Math.max(0, Math.min(maxValue, 1));
-}
-
-function drawDecodedWaveform(ctx, width, centerY, maxAmplitude) {
-  const analysis = state.chart?.audio_analysis;
-  const lowSeries = analysis?.waveform_band_low;
-  const midSeries = analysis?.waveform_band_mid;
-  const highSeries = analysis?.waveform_band_high;
-  if (!Array.isArray(lowSeries) || !Array.isArray(midSeries) || !Array.isArray(highSeries)) {
-    return false;
-  }
-  if (!lowSeries.length || !midSeries.length || !highSeries.length) {
-    return false;
-  }
-
-  for (let x = 0; x < width; x += 1) {
-    const bandValues = [
-      sampleEnvelopeValue(lowSeries, x, width),
-      sampleEnvelopeValue(midSeries, x, width),
-      sampleEnvelopeValue(highSeries, x, width)
-    ];
-    for (let i = 0; i < WAVEFORM_BAND_LAYERS.length; i += 1) {
-      const layer = WAVEFORM_BAND_LAYERS[i];
-      const amplitude = Math.max(1, bandValues[i] * layer.gain * maxAmplitude);
-      const top = Math.max(0, centerY - amplitude);
-      const bottom = Math.min(centerY * 2, centerY + amplitude);
-      const barHeight = Math.max(1, bottom - top);
-      ctx.globalAlpha = layer.alpha;
-      ctx.fillStyle = layer.color;
-      ctx.fillRect(x, top, 1, barHeight);
-    }
-  }
-
-  ctx.globalAlpha = 1;
-  return true;
-}
-
 function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
-  const canvas = document.getElementById('game-spectral-waveform');
-  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
-  const beatTimesMs = state.chart?.audio_analysis?.beat_times_ms;
-  if (!canvas) {
-    return;
-  }
-  const ctx = canvas.getContext('2d');
-  const width = Math.max(canvas.clientWidth, 1);
-  const height = Math.max(canvas.clientHeight, 1);
-  canvas.width = width;
-  canvas.height = height;
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#020617';
-  ctx.fillRect(0, 0, width, height);
-
-  const durationMs = resolveWaveformDurationMs();
-  const axisY = height - 16;
-  const centerY = (axisY - 2) / 2;
-  const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
-  const hasDetailedWaveform = drawDecodedWaveform(ctx, width, centerY, maxAmplitude);
-  const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
-  drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
-
-  if (Array.isArray(descriptors) && descriptors.length > 0) {
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    for (const descriptor of descriptors) {
-      const timeMs = Number(descriptor.time_ms) || 0;
-      const x = (timeMs / durationMs) * width;
-      const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
-      ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
-      ctx.globalAlpha = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(x, centerY - amplitude);
-      ctx.lineTo(x, centerY + amplitude);
-      ctx.stroke();
-    }
-  } else if (!hasDetailedWaveform) {
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
-    ctx.font = "12px 'Space Grotesk', sans-serif";
-    ctx.fillText('Run Analyze Song in Manage Songs to generate colors.', 16, 24);
-    return;
-  }
-
-  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#f8fafc';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(progressX, 0);
-  ctx.lineTo(progressX, axisY);
-  ctx.stroke();
-  drawSpectralTimeAxis(ctx, width, height, durationMs);
-
-  if (isSessionPlaying() && state.waveformZoom > 1 && !isGameWaveformDragging) {
-    const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
-    if (scrollContainer) {
-      const leftTarget = progressX - (scrollContainer.clientWidth * 0.5);
-      const maxLeft = Math.max(scrollContainer.scrollWidth - scrollContainer.clientWidth, 0);
-      scrollContainer.scrollLeft = Math.max(0, Math.min(leftTarget, maxLeft));
-      updateVisibleWaveformWindowRatios(scrollContainer);
-    }
-  }
+  ensureGameWaveformController()?.renderMain(progressMs);
 }
 
 function pushTimelineEntry(timeline, lane, entry) {
@@ -923,7 +734,7 @@ function formatDeltaMs(deltaMs) {
   if (roundedMs === 0) {
     return 'on time';
   }
-  return roundedMs > 0 ? `${roundedMs} ms late` : `${Math.abs(roundedMs)} ms early`;
+  return roundedMs > 0 ? `${formatMs(roundedMs)} late` : `${formatMs(Math.abs(roundedMs))} early`;
 }
 
 function renderLaneLogEntry(entry) {
@@ -931,7 +742,7 @@ function renderLaneLogEntry(entry) {
     return [
       '<span class="timeline-badge trigger">Trigger</span>',
       `<span class="timeline-main">@${formatMs(entry.hitTimeMs)}</span>`,
-      `<span class="timeline-meta">${entry.remainingMs} ms left</span>`
+      `<span class="timeline-meta">${formatMs(entry.remainingMs)} left</span>`
     ].join('');
   }
 
@@ -975,6 +786,27 @@ function setDebugVisibility(visible) {
   }
 }
 
+function resolveCurrentPlaybackMs() {
+  const audio = ensureAudioElement();
+  const audioMs = audio ? audio.currentTime * 1000 : Number.NaN;
+  if (Number.isFinite(audioMs) && audioMs >= 0) {
+    return audioMs;
+  }
+  return Math.max(state.sessionProgressMs || 0, 0);
+}
+
+function renderGameMeta() {
+  const currentTimeEl = document.getElementById('game-current-time');
+  if (currentTimeEl) {
+    currentTimeEl.textContent = formatPlaybackTime(resolveCurrentPlaybackMs());
+  }
+
+  const trackLengthEl = document.getElementById('game-track-length');
+  if (trackLengthEl) {
+    trackLengthEl.textContent = formatPlaybackTime(resolveWaveformDurationMs());
+  }
+}
+
 function renderDebugPanel() {
   const remainingEl = document.getElementById('debug-remaining-time');
   if (remainingEl) {
@@ -986,22 +818,23 @@ function renderDebugPanel() {
   if (state.chart?.judgement_windows_ms) {
     const windows = state.chart.judgement_windows_ms;
     if (perfectEl) {
-      perfectEl.textContent = `Perfect ±${windows.perfect} ms`;
+      perfectEl.textContent = `Perfect ±${formatMs(windows.perfect)}`;
     }
     if (goodEl) {
-      goodEl.textContent = `Good ±${windows.good} ms`;
+      goodEl.textContent = `Good ±${formatMs(windows.good)}`;
     }
   } else {
     if (perfectEl) {
-      perfectEl.textContent = 'Perfect ±0 ms';
+      perfectEl.textContent = 'Perfect ±0.00s';
     }
     if (goodEl) {
-      goodEl.textContent = 'Good ±0 ms';
+      goodEl.textContent = 'Good ±0.00s';
     }
   }
 
   renderLaneLog('left-lane-log', 'left');
   renderLaneLog('right-lane-log', 'right');
+  renderGameMeta();
 }
 
 function handleBarFrame(payload) {
@@ -1092,6 +925,7 @@ function connectWebSocket() {
           state.sessionProgressMs = payload.progress_ms;
         }
         updateUI();
+        renderGameSpectralWaveform();
         renderDebugPanel();
         return;
       }
@@ -1107,6 +941,7 @@ function connectWebSocket() {
             );
           }
         }
+        renderGameSpectralWaveform();
         renderVisualizer();
         renderDebugPanel();
         return;
@@ -1164,6 +999,7 @@ async function loadChart(songId) {
     }
     const chartData = await response.json();
     state.chart = chartData;
+    ensureGameWaveformController()?.invalidateOverviewCache();
     state.chartDurationMs = computeChartDuration(chartData);
     const descriptors = chartData?.audio_analysis?.beat_descriptors;
     if (Array.isArray(descriptors) && descriptors.length > 0) {
@@ -1175,7 +1011,8 @@ async function loadChart(songId) {
       state.spectralRmsMax = 1;
     }
     buildGameBeatSlots();
-    applyGameWaveformZoom();
+    applyGameWaveformZoom({ preferExisting: true });
+    ensureGameWaveformController()?.setVisibleWindowStart(0);
     renderGameBeatGrid();
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
@@ -1303,28 +1140,27 @@ function init() {
     setDebugVisibility(!state.debugVisible);
   });
 
+  const audio = ensureAudioElement();
+  ['loadedmetadata', 'timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
+    audio.addEventListener(eventName, () => {
+      renderGameMeta();
+      renderGameSpectralWaveform(resolveCurrentPlaybackMs());
+    });
+  });
+
   setDebugVisibility(state.debugVisible);
   renderDebugPanel();
   initGameWaveform();
+  ensureGameWaveformController();
   applyGameWaveformZoom({ preferExisting: true });
   renderGameBeatGrid();
 
-  const waveformScroll = document.getElementById('game-spectral-waveform-scroll');
-  if (waveformScroll) {
-    waveformScroll.addEventListener('scroll', () => {
-      updateVisibleWaveformWindowRatios(waveformScroll);
-    });
-    waveformScroll.addEventListener('mousedown', startGameWaveformDrag);
-  }
-  window.addEventListener('mousemove', handleGameWaveformDragMove);
-  window.addEventListener('mouseup', stopGameWaveformDrag);
-
-    window.addEventListener('keydown', handleKeydown);
-    window.addEventListener('resize', () => {
-      applyGameWaveformZoom();
-      renderGameBeatGrid();
-      renderGameSpectralWaveform();
-    });
+  window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('resize', () => {
+    applyGameWaveformZoom();
+    renderGameBeatGrid();
+    renderGameSpectralWaveform();
+  });
   
   fetchSongs();
   connectWebSocket();

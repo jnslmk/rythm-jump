@@ -439,6 +439,15 @@ canvas {
   color: var(--text-muted);
 }
 
+.game-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.9rem 1.4rem;
+  margin-top: 0.85rem;
+  text-align: left;
+}
+
 input[type='file'] {
   padding: 0.5rem 1rem;
 }
@@ -715,6 +724,11 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .game-meta-row {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
   .debug-body .debug-row {
     flex-direction: column;
     align-items: flex-start;

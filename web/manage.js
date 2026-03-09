@@ -1,35 +1,17 @@
 const apiBaseUrl = '/api';
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
-const MIN_SPECTRAL_RMS = 0.001;
+const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
 const WAVEFORM_ZOOM_MIN = 1;
 const MAX_VISIBLE_BEATS = 16;
 const SUBDIVISIONS_PER_BEAT = 2;
 const BEAT_GRID_OVERSCAN_SUBDIVISIONS = 96;
-const WAVEFORM_BAND_LAYERS = [
-  { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 }, // lows
-  { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 }, // mids
-  { alpha: 0.82, color: 'rgba(14, 165, 233, 0.74)', gain: 1.25 } // highs
-];
 
 let wavesurfer = null;
 let wsRegions = null;
 let currentSongId = '';
-let isWaveformDragging = false;
-let waveformDragStartX = 0;
-let waveformDragStartLeft = 0;
-let waveformDragTargetLeft = 0;
-let waveformDragRafId = 0;
-let isOverviewDragging = false;
-let overviewDragOffsetRatio = 0;
-let overviewRenderRafId = 0;
-let pendingOverviewProgressMs = 0;
-let overviewBaseCacheCanvas = null;
-let overviewBaseCacheWidth = 0;
-let overviewBaseCacheHeight = 0;
-let overviewBaseCacheAnalysisRef = null;
-let visibleWaveformWindowRatios = { start: 0, end: 1 };
 let beatGridWindowRenderRafId = 0;
 let lastRenderedBeatGridRange = { startIndex: -1, endIndex: -1 };
+let manageWaveformController = null;
 let state = {
   songs: [],
   bpm: 120,
@@ -178,6 +160,37 @@ function findClosestSubdivisionIndex(timeMs, toleranceMs) {
   }
 
   return bestDiff <= toleranceMs ? bestIdx : -1;
+}
+
+function ensureManageWaveformController() {
+  if (manageWaveformController || !window.SpectralWaveform) {
+    return manageWaveformController;
+  }
+
+  manageWaveformController = window.SpectralWaveform.createController({
+    canvas: '#manage-spectral-waveform',
+    scrollContainer: '#spectral-waveform-scroll',
+    overviewCanvas: '#manage-spectral-waveform-overview',
+    emptyMessage: 'Run Analyze Song to render a colored waveform.',
+    getAnalysis: () => state.audioAnalysis,
+    getBarBeats: () => state.beats.filter((beat) => beat.isBar),
+    getBeatTimesMs: () => (state.beats.length
+      ? state.beats.map((beat) => beat.timeMs)
+      : (state.audioAnalysis?.beat_times_ms || [])),
+    getDurationMs: resolveManageWaveformDurationMs,
+    getProgressMs: () => (wavesurfer?.getCurrentTime?.() || 0) * 1000,
+    getRmsMax: () => state.spectralRmsMax,
+    getZoom: () => state.waveformZoom || 1,
+    onScroll: () => {
+      scheduleBeatGridWindowRender();
+    },
+    onVisibleWindowChange: () => {
+      scheduleBeatGridWindowRender();
+    },
+    shouldAutoFollow: () => isWavePlaying
+  });
+  manageWaveformController.attach();
+  return manageWaveformController;
 }
 
 function buildBeatSelectionSets() {
@@ -414,90 +427,6 @@ function resolveManageWaveformDurationMs() {
   return 1;
 }
 
-function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
-  if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
-    return;
-  }
-  for (let i = 0; i < beatTimesMs.length; i += 1) {
-    const beatMs = Number(beatTimesMs[i]) || 0;
-    const x = (beatMs / durationMs) * width;
-    const isBarStart = i % 4 === 0;
-    ctx.strokeStyle = isBarStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
-    ctx.lineWidth = isBarStart ? 2 : 1;
-    ctx.beginPath();
-    ctx.moveTo(x, 2);
-    ctx.lineTo(x, axisY);
-    ctx.stroke();
-  }
-}
-
-function drawBarBeatLabels(ctx, width, durationMs) {
-  const barBeats = state.beats.filter((beat) => beat.isBar);
-  if (!barBeats.length) {
-    return;
-  }
-  ctx.fillStyle = 'rgba(248, 250, 252, 0.9)';
-  ctx.font = "10px 'Space Grotesk', sans-serif";
-  for (const barBeat of barBeats) {
-    const x = Math.max(0, Math.min((barBeat.timeMs / durationMs) * width, width - 1));
-    ctx.fillText(String(barBeat.index + 1), Math.min(x + 3, width - 16), 12);
-  }
-}
-
-function sampleEnvelopeValue(series, x, width) {
-  if (!Array.isArray(series) || series.length === 0 || width <= 0) {
-    return 0;
-  }
-  const seriesLen = series.length;
-  const start = Math.floor((x / width) * seriesLen);
-  let end = Math.floor(((x + 1) / width) * seriesLen);
-  if (end <= start) {
-    end = start + 1;
-  }
-
-  let maxValue = 0;
-  for (let i = start; i < end && i < seriesLen; i += 1) {
-    const value = Number(series[i]) || 0;
-    if (value > maxValue) {
-      maxValue = value;
-    }
-  }
-  return Math.max(0, Math.min(maxValue, 1));
-}
-
-function drawDecodedWaveform(ctx, width, centerY, maxAmplitude) {
-  const lowSeries = state.audioAnalysis?.waveform_band_low;
-  const midSeries = state.audioAnalysis?.waveform_band_mid;
-  const highSeries = state.audioAnalysis?.waveform_band_high;
-  if (!Array.isArray(lowSeries) || !Array.isArray(midSeries) || !Array.isArray(highSeries)) {
-    return false;
-  }
-  if (!lowSeries.length || !midSeries.length || !highSeries.length) {
-    return false;
-  }
-
-  for (let x = 0; x < width; x += 1) {
-    const bandValues = [
-      sampleEnvelopeValue(lowSeries, x, width),
-      sampleEnvelopeValue(midSeries, x, width),
-      sampleEnvelopeValue(highSeries, x, width)
-    ];
-
-    for (let i = 0; i < WAVEFORM_BAND_LAYERS.length; i += 1) {
-      const layer = WAVEFORM_BAND_LAYERS[i];
-      const amplitude = Math.max(1, bandValues[i] * layer.gain * maxAmplitude);
-      const top = Math.max(0, centerY - amplitude);
-      const bottom = Math.min(centerY * 2, centerY + amplitude);
-      const barHeight = Math.max(1, bottom - top);
-      ctx.globalAlpha = layer.alpha;
-      ctx.fillStyle = layer.color;
-      ctx.fillRect(x, top, 1, barHeight);
-    }
-  }
-  ctx.globalAlpha = 1;
-  return true;
-}
-
 function getMaxWaveformZoom() {
   const durationMs = resolveManageWaveformDurationMs();
   const beatIntervalMs = state.beatIntervalMs > 0
@@ -516,6 +445,7 @@ function clampWaveformZoom(zoom) {
 }
 
 function applyWaveformZoom() {
+  ensureManageWaveformController();
   const spectralWaveform = document.getElementById('manage-spectral-waveform');
   const beatGrid = document.getElementById('zoom-beat-grid');
   if (!spectralWaveform) {
@@ -538,353 +468,26 @@ function applyWaveformZoom() {
   renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
 }
 
-function startWaveformDrag(event) {
-  if (event.button !== 0) {
-    return;
-  }
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  if (!scrollContainer || scrollContainer.scrollWidth <= scrollContainer.clientWidth) {
-    return;
-  }
-  isWaveformDragging = true;
-  waveformDragStartX = event.clientX;
-  waveformDragStartLeft = scrollContainer.scrollLeft;
-  scrollContainer.classList.add('dragging');
-  event.preventDefault();
-}
-
-function handleWaveformDragMove(event) {
-  if (!isWaveformDragging) {
-    return;
-  }
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  if (!scrollContainer) {
-    return;
-  }
-  const dragDelta = event.clientX - waveformDragStartX;
-  waveformDragTargetLeft = waveformDragStartLeft - dragDelta;
-  if (waveformDragRafId) {
-    return;
-  }
-  waveformDragRafId = window.requestAnimationFrame(() => {
-    waveformDragRafId = 0;
-    scrollContainer.scrollLeft = waveformDragTargetLeft;
-  });
-}
-
-function stopWaveformDrag() {
-  if (!isWaveformDragging) {
-    return;
-  }
-  isWaveformDragging = false;
-  if (waveformDragRafId) {
-    window.cancelAnimationFrame(waveformDragRafId);
-    waveformDragRafId = 0;
-  }
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  if (scrollContainer) {
-    scrollContainer.classList.remove('dragging');
-  }
-  scheduleManageOverviewWaveformRender((wavesurfer?.getCurrentTime?.() || 0) * 1000);
-}
-
-function setVisibleWaveformWindowStart(startRatio) {
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  const zoomedCanvas = document.getElementById('manage-spectral-waveform');
-  if (!scrollContainer || !zoomedCanvas) {
-    return;
-  }
-  const totalWidth = Math.max(zoomedCanvas.clientWidth, 1);
-  const viewportWidth = Math.max(scrollContainer.clientWidth, 1);
-  const maxStartRatio = Math.max(1 - (viewportWidth / totalWidth), 0);
-  const normalizedStartRatio = Math.max(0, Math.min(startRatio, maxStartRatio));
-  const maxLeft = Math.max(totalWidth - viewportWidth, 0);
-  scrollContainer.scrollLeft = Math.max(0, Math.min(normalizedStartRatio * totalWidth, maxLeft));
-  updateVisibleWaveformWindowRatios(scrollContainer);
-}
-
-function getOverviewPointerRatio(event) {
-  const canvas = document.getElementById('manage-spectral-waveform-overview');
-  if (!canvas) {
-    return null;
-  }
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0) {
-    return null;
-  }
-  return Math.max(0, Math.min((event.clientX - rect.left) / rect.width, 1));
-}
-
-function startOverviewDrag(event) {
-  if (event.button !== 0) {
-    return;
-  }
-  const canvas = document.getElementById('manage-spectral-waveform-overview');
-  if (!canvas) {
-    return;
-  }
-  const pointerRatio = getOverviewPointerRatio(event);
-  if (pointerRatio === null) {
-    return;
-  }
-
-  const visibleWindow = getVisibleWaveformWindowRatios();
-  const windowWidthRatio = Math.max(visibleWindow.end - visibleWindow.start, 0);
-  if (windowWidthRatio >= 1) {
-    return;
-  }
-
-  if (pointerRatio >= visibleWindow.start && pointerRatio <= visibleWindow.end) {
-    overviewDragOffsetRatio = pointerRatio - visibleWindow.start;
-  } else {
-    overviewDragOffsetRatio = windowWidthRatio * 0.5;
-    setVisibleWaveformWindowStart(pointerRatio - overviewDragOffsetRatio);
-  }
-
-  isOverviewDragging = true;
-  canvas.classList.add('dragging');
-  event.preventDefault();
-}
-
-function handleOverviewDragMove(event) {
-  if (!isOverviewDragging) {
-    return;
-  }
-  const pointerRatio = getOverviewPointerRatio(event);
-  if (pointerRatio === null) {
-    return;
-  }
-  setVisibleWaveformWindowStart(pointerRatio - overviewDragOffsetRatio);
-}
-
-function stopOverviewDrag() {
-  if (!isOverviewDragging) {
-    return;
-  }
-  isOverviewDragging = false;
-  const canvas = document.getElementById('manage-spectral-waveform-overview');
-  if (canvas) {
-    canvas.classList.remove('dragging');
-  }
-}
-
 function getVisibleWaveformWindowRatios() {
-  const scrollContainer = document.getElementById('spectral-waveform-scroll');
-  if (!scrollContainer) {
-    return visibleWaveformWindowRatios;
-  }
-  return updateVisibleWaveformWindowRatios(scrollContainer);
+  const controller = ensureManageWaveformController();
+  return controller ? controller.getVisibleWindowRatios() : { start: 0, end: 1 };
 }
 
 function updateVisibleWaveformWindowRatios(scrollContainer) {
-  if (!scrollContainer) {
-    visibleWaveformWindowRatios = { start: 0, end: 1 };
-    return visibleWaveformWindowRatios;
-  }
-  const totalWidth = Math.max(scrollContainer.scrollWidth, 1);
-  const viewportWidth = Math.max(scrollContainer.clientWidth, 1);
-  const maxLeft = Math.max(totalWidth - viewportWidth, 0);
-  const left = Math.max(0, Math.min(scrollContainer.scrollLeft, maxLeft));
-  const right = Math.max(left, Math.min(left + viewportWidth, totalWidth));
-  visibleWaveformWindowRatios = {
-    start: left / totalWidth,
-    end: right / totalWidth
-  };
-  return visibleWaveformWindowRatios;
-}
-
-function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
-  if (!canvas) {
-    return;
-  }
-
-  const width = Math.max(canvas.clientWidth || canvas.width || 0, 1);
-  const height = Math.max(canvas.clientHeight || canvas.height || 0, 1);
-
-  // Avoid drawing while no meaningful canvas size exists (e.g. hidden layout with no buffer).
-  if (width < 2 || height < 2) {
-    return;
-  }
-
-  const ctx = canvas.getContext('2d');
-  if (canvas.width !== width) {
-    canvas.width = width;
-  }
-  if (canvas.height !== height) {
-    canvas.height = height;
-  }
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#020617';
-  ctx.fillRect(0, 0, width, height);
-
-  const descriptors = state.audioAnalysis?.beat_descriptors;
-  const beatTimesMs = state.beats.length
-    ? state.beats.map((beat) => beat.timeMs)
-    : (state.audioAnalysis?.beat_times_ms || []);
-  const showBeatMarkers = options.showBeatMarkers !== false;
-  const showDescriptors = options.showDescriptors !== false;
-  const durationMs = resolveManageWaveformDurationMs();
-  const axisY = height - 2;
-  const centerY = axisY / 2;
-  const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
-  const hasDetailedWaveform = drawDecodedWaveform(ctx, width, centerY, maxAmplitude);
-  const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
-  if (showBeatMarkers) {
-    drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
-    drawBarBeatLabels(ctx, width, durationMs);
-  }
-
-  if (showDescriptors && Array.isArray(descriptors) && descriptors.length > 0) {
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    for (const descriptor of descriptors) {
-      const timeMs = Number(descriptor.time_ms) || 0;
-      const x = (timeMs / durationMs) * width;
-      const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
-      ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
-      ctx.globalAlpha = 0.82;
-      ctx.beginPath();
-      ctx.moveTo(x, centerY - amplitude);
-      ctx.lineTo(x, centerY + amplitude);
-      ctx.stroke();
-    }
-  } else if (!hasDetailedWaveform) {
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
-    ctx.font = "12px 'Space Grotesk', sans-serif";
-    ctx.fillText('Run Analyze Song to render a colored waveform.', 16, 24);
-    return;
-  }
-
-  const highlightWindowRatios = options.highlightWindowRatios || null;
-  if (highlightWindowRatios) {
-    const startRatio = Math.max(0, Math.min(Number(highlightWindowRatios.start) || 0, 1));
-    const endRatio = Math.max(startRatio, Math.min(Number(highlightWindowRatios.end) || 1, 1));
-    const highlightX = startRatio * width;
-    const highlightW = Math.max(1, (endRatio - startRatio) * width);
-    ctx.globalAlpha = 0.16;
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(highlightX, 0, highlightW, axisY);
-    ctx.globalAlpha = 0.9;
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(highlightX, 0.75, highlightW, Math.max(axisY - 1.5, 1));
-  }
-
-  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#f8fafc';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(progressX, 0);
-  ctx.lineTo(progressX, axisY);
-  ctx.stroke();
+  const controller = ensureManageWaveformController();
+  return controller ? controller.updateVisibleWindowRatios(scrollContainer) : { start: 0, end: 1 };
 }
 
 function renderManageSpectralWaveform(progressMs = 0) {
-  const canvas = document.getElementById('manage-spectral-waveform');
-  renderSpectralWaveformCanvas(canvas, progressMs);
-
-  if (isWavePlaying && (state.waveformZoom || 1) > 1) {
-    const scrollContainer = document.getElementById('spectral-waveform-scroll');
-    const durationMs = resolveManageWaveformDurationMs();
-    const width = Math.max(canvas?.clientWidth || 1, 1);
-    if (scrollContainer) {
-      const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
-      const leftTarget = progressX - (scrollContainer.clientWidth * 0.5);
-      const maxLeft = Math.max(scrollContainer.scrollWidth - scrollContainer.clientWidth, 0);
-      scrollContainer.scrollLeft = Math.max(0, Math.min(leftTarget, maxLeft));
-      updateVisibleWaveformWindowRatios(scrollContainer);
-    }
-  }
-
-  scheduleManageOverviewWaveformRender(progressMs);
+  ensureManageWaveformController()?.renderMain(progressMs);
 }
 
 function renderManageOverviewWaveform(progressMs = 0) {
-  const canvas = document.getElementById('manage-spectral-waveform-overview');
-  if (!canvas) {
-    return;
-  }
-
-  // Avoid collapsing the draw buffer while the editor section is hidden.
-  if (canvas.clientWidth < 2 || canvas.clientHeight < 2) {
-    return;
-  }
-
-  const ctx = canvas.getContext('2d');
-  const width = Math.max(canvas.clientWidth, 1);
-  const height = Math.max(canvas.clientHeight, 1);
-  if (canvas.width !== width) {
-    canvas.width = width;
-  }
-  if (canvas.height !== height) {
-    canvas.height = height;
-  }
-
-  const baseCanvas = getOverviewBaseCanvas(width, height);
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(baseCanvas, 0, 0);
-
-  const axisY = height - 2;
-  const highlightWindowRatios = getVisibleWaveformWindowRatios();
-  const startRatio = Math.max(0, Math.min(Number(highlightWindowRatios.start) || 0, 1));
-  const endRatio = Math.max(startRatio, Math.min(Number(highlightWindowRatios.end) || 1, 1));
-  const highlightX = startRatio * width;
-  const highlightW = Math.max(1, (endRatio - startRatio) * width);
-  ctx.globalAlpha = 0.16;
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillRect(highlightX, 0, highlightW, axisY);
-  ctx.globalAlpha = 0.9;
-  ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(highlightX, 0.75, highlightW, Math.max(axisY - 1.5, 1));
-
-  const durationMs = resolveManageWaveformDurationMs();
-  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#f8fafc';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(progressX, 0);
-  ctx.lineTo(progressX, axisY);
-  ctx.stroke();
+  ensureManageWaveformController()?.renderOverview(progressMs);
 }
 
 function scheduleManageOverviewWaveformRender(progressMs = 0) {
-  pendingOverviewProgressMs = progressMs;
-  if (overviewRenderRafId) {
-    return;
-  }
-  overviewRenderRafId = window.requestAnimationFrame(() => {
-    overviewRenderRafId = 0;
-    renderManageOverviewWaveform(pendingOverviewProgressMs);
-  });
-}
-
-function getOverviewBaseCanvas(width, height) {
-  const analysisRef = state.audioAnalysis;
-  if (
-    overviewBaseCacheCanvas
-    && overviewBaseCacheWidth === width
-    && overviewBaseCacheHeight === height
-    && overviewBaseCacheAnalysisRef === analysisRef
-  ) {
-    return overviewBaseCacheCanvas;
-  }
-
-  overviewBaseCacheCanvas = document.createElement('canvas');
-  overviewBaseCacheCanvas.width = width;
-  overviewBaseCacheCanvas.height = height;
-  overviewBaseCacheWidth = width;
-  overviewBaseCacheHeight = height;
-  overviewBaseCacheAnalysisRef = analysisRef;
-
-  renderSpectralWaveformCanvas(overviewBaseCacheCanvas, 0, {
-    showBeatMarkers: false,
-    showDescriptors: false
-  });
-  return overviewBaseCacheCanvas;
+  ensureManageWaveformController()?.scheduleOverviewRender(progressMs);
 }
 
 async function fetchSongs() {
@@ -906,7 +509,7 @@ async function fetchSongs() {
 async function loadSong(songId) {
   currentSongId = songId;
   isWavePlaying = false;
-  visibleWaveformWindowRatios = { start: 0, end: 1 };
+  ensureManageWaveformController()?.setVisibleWindowStart(0);
   state.chartBaselineSignature = '';
   state.hasUnsavedChartChanges = false;
   updateControlStates();
@@ -1176,6 +779,7 @@ async function analyzeAudioMetadata() {
 
     const payload = await response.json();
     state.audioAnalysis = payload.analysis || null;
+    ensureManageWaveformController()?.invalidateOverviewCache();
     const analyzedOffset = Number(payload?.global_offset_ms);
     if (Number.isFinite(analyzedOffset)) {
       state.offset = Math.round(analyzedOffset);
@@ -1227,11 +831,12 @@ function init() {
       editor.setAttribute('aria-hidden', 'true');
       currentSongId = '';
       isWavePlaying = false;
-      stopWaveformDrag();
-      stopOverviewDrag();
+      ensureManageWaveformController()?.stopScrollDrag();
+      ensureManageWaveformController()?.stopOverviewDrag();
       state.audioAnalysis = null;
       state.spectralRmsMax = 1;
-      visibleWaveformWindowRatios = { start: 0, end: 1 };
+      ensureManageWaveformController()?.invalidateOverviewCache();
+      ensureManageWaveformController()?.updateVisibleWindowRatios();
       state.chartBaselineSignature = '';
       state.hasUnsavedChartChanges = false;
       if (wavesurfer) {
@@ -1299,19 +904,7 @@ function init() {
   document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
   document.getElementById('global-offset').addEventListener('input', refreshChartDirtyState);
   document.getElementById('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
-  const waveformScroll = document.getElementById('spectral-waveform-scroll');
-  waveformScroll.addEventListener('scroll', () => {
-    updateVisibleWaveformWindowRatios(waveformScroll);
-    scheduleBeatGridWindowRender();
-    scheduleManageOverviewWaveformRender((wavesurfer?.getCurrentTime?.() || 0) * 1000);
-  }, { passive: true });
-  waveformScroll.addEventListener('mousedown', startWaveformDrag);
-  window.addEventListener('mousemove', handleWaveformDragMove);
-  window.addEventListener('mouseup', stopWaveformDrag);
-  const waveformOverview = document.getElementById('manage-spectral-waveform-overview');
-  waveformOverview.addEventListener('mousedown', startOverviewDrag);
-  window.addEventListener('mousemove', handleOverviewDragMove);
-  window.addEventListener('mouseup', stopOverviewDrag);
+  ensureManageWaveformController();
   
   document.getElementById('btn-save-chart').addEventListener('click', saveChart);
   window.addEventListener('resize', () => {
@@ -1324,5 +917,10 @@ function init() {
   updateControlStates();
   fetchSongs();
 }
+
+window.loadSong = loadSong;
+window.renderManageOverviewWaveform = renderManageOverviewWaveform;
+window.scheduleManageOverviewWaveformRender = scheduleManageOverviewWaveformRender;
+window.updateVisibleWaveformWindowRatios = updateVisibleWaveformWindowRatios;
 
 document.addEventListener('DOMContentLoaded', init);

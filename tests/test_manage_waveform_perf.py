@@ -157,6 +157,9 @@ def test_manage_waveform_overview_draw_speed_budget() -> None:
     budget_ms = float(os.getenv("WAVEFORM_OVERVIEW_DRAW_BUDGET_MS", "16.0"))
     frame_count = int(os.getenv("WAVEFORM_OVERVIEW_DRAW_FRAME_COUNT", "180"))
     manage_js_path = Path(__file__).resolve().parents[1] / "web" / "manage.js"
+    spectral_waveform_js_path = (
+        Path(__file__).resolve().parents[1] / "web" / "spectral-waveform.js"
+    )
 
     with sync_playwright() as playwright:
         browser = None
@@ -169,6 +172,7 @@ def test_manage_waveform_overview_draw_speed_budget() -> None:
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.set_content(_perf_dom_html())
         page.add_script_tag(content=_build_wave_surfer_mock_script())
+        page.add_script_tag(path=str(spectral_waveform_js_path))
         page.add_script_tag(path=str(manage_js_path))
 
         result: dict[str, Any] = page.evaluate(

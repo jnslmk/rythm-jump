@@ -14,6 +14,7 @@
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+    <script src="spectral-waveform.js"></script>
   </head>
   <body>
     <nav class="center-content flex-gap">
@@ -60,6 +61,15 @@
                 ></div>
               </div>
             </div>
+            <div class="overview-waveform-wrap">
+              <canvas
+                id="game-spectral-waveform-overview"
+                class="spectral-waveform spectral-waveform-overview"
+                width="960"
+                height="72"
+                aria-label="Full song waveform with current zoom window"
+              ></canvas>
+            </div>
           </div>
         </div>
       </section>
@@ -71,7 +81,11 @@
         height="70"
         aria-label="LED Strip Visualization"
       ></canvas>
-      <p class="hint">Keyboard: A/Space (Left), L/Enter (Right)</p>
+      <div class="game-meta-row hint">
+        <span>Keyboard: A/Space (Left), L/Enter (Right)</span>
+        <span>Current: <span id="game-current-time">--</span></span>
+        <span>Length: <span id="game-track-length">--</span></span>
+      </div>
     </section>
 
     <div class="surface surface-plain debug-toggle-wrapper">
