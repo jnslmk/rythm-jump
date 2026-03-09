@@ -72,6 +72,12 @@ def test_manage_waveform_load_starts_with_zoomed_window() -> None:
     spectral_waveform_js_path = (
         Path(__file__).resolve().parents[1] / "web" / "spectral-waveform.js"
     )
+    style_css_path = Path(__file__).resolve().parents[1] / "web" / "style.css"
+    oat_css_path = (
+        Path(__file__).resolve().parents[1] / "web" / "vendor" / "oat.min.css"
+    )
+    style_css = style_css_path.read_text(encoding="utf-8")
+    oat_css = oat_css_path.read_text(encoding="utf-8")
 
     with sync_playwright() as playwright:
         browser = None
@@ -86,6 +92,10 @@ def test_manage_waveform_load_starts_with_zoomed_window() -> None:
             """
 <!doctype html>
 <html lang="en">
+  <head>
+    <style>__OAT_CSS__</style>
+    <style>__STYLE_CSS__</style>
+  </head>
   <body>
     <form id="upload-form"><button type="submit">Upload</button></form>
     <input id="new-song-id" />
@@ -130,7 +140,7 @@ def test_manage_waveform_load_starts_with_zoomed_window() -> None:
     </section>
   </body>
 </html>
-""",
+""".replace("__OAT_CSS__", oat_css).replace("__STYLE_CSS__", style_css),
         )
         page.add_script_tag(
             content="""
