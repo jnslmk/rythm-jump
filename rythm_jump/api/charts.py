@@ -30,6 +30,12 @@ _MIN_BEAT_COUNT: Final[int] = 2
 _LOW_BAND_MIN_HZ: Final[float] = 20.0
 _LOW_BAND_MAX_HZ: Final[float] = 250.0
 _MID_BAND_MAX_HZ: Final[float] = 2000.0
+_AUTO_PATTERN_MIN_NOTES: Final[int] = 8
+_AUTO_PATTERN_MIN_DENSITY: Final[float] = 0.32
+_AUTO_PATTERN_MAX_DENSITY: Final[float] = 0.55
+_AUTO_PATTERN_DOUBLE_NOTE_RATIO: Final[float] = 0.12
+_AUTO_PATTERN_DOUBLE_NOTE_MIN_GAP: Final[int] = 2
+_AUTO_PATTERN_DOUBLE_NOTE_LOW_BAND_THRESHOLD: Final[float] = 0.55
 
 _SONG_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -105,6 +111,129 @@ def _dominant_band_color(dominant_band: str) -> str:
         "mid": "#2dd4bf",
         "high": "#f472b6",
     }[dominant_band]
+
+
+def _normalize_feature(values: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return values
+    lower = float(np.percentile(values, 10))
+    upper = float(np.percentile(values, 90))
+    if upper <= lower:
+        return np.clip(values, 0.0, 1.0)
+    return np.clip((values - lower) / (upper - lower), 0.0, 1.0)
+
+
+def _generate_auto_pattern_from_analysis(  # noqa: PLR0915
+    analysis: AudioAnalysis,
+) -> tuple[list[int], list[int]]:
+    beat_count = min(len(analysis.beat_times_ms), len(analysis.beat_descriptors))
+    if beat_count == 0:
+        return [], []
+
+    beat_times = np.asarray(analysis.beat_times_ms[:beat_count], dtype=np.int64)
+    descriptors = analysis.beat_descriptors[:beat_count]
+    onset_values = np.asarray(
+        [descriptor.onset_strength for descriptor in descriptors],
+        dtype=np.float64,
+    )
+    rms_values = np.asarray(
+        [descriptor.rms for descriptor in descriptors],
+        dtype=np.float64,
+    )
+    low_band_values = np.asarray(
+        [descriptor.band_energy.low for descriptor in descriptors],
+        dtype=np.float64,
+    )
+    dominant_low_values = np.asarray(
+        [
+            1.0 if descriptor.dominant_band == "low" else 0.0
+            for descriptor in descriptors
+        ],
+        dtype=np.float64,
+    )
+    bar_start_values = np.asarray(
+        [1.0 if index % 4 == 0 else 0.0 for index in range(beat_count)],
+        dtype=np.float64,
+    )
+
+    onset_scores = _normalize_feature(onset_values)
+    rms_scores = _normalize_feature(rms_values)
+    low_band_scores = np.clip(low_band_values, 0.0, 1.0)
+    note_scores = (
+        (onset_scores * 0.4)
+        + (rms_scores * 0.25)
+        + (low_band_scores * 0.25)
+        + (dominant_low_values * 0.05)
+        + (bar_start_values * 0.05)
+    )
+
+    mean_score = float(np.mean(note_scores))
+    target_density = float(
+        np.clip(
+            _AUTO_PATTERN_MIN_DENSITY + (mean_score * 0.18),
+            _AUTO_PATTERN_MIN_DENSITY,
+            _AUTO_PATTERN_MAX_DENSITY,
+        ),
+    )
+    target_note_count = min(
+        beat_count,
+        max(_AUTO_PATTERN_MIN_NOTES, round(beat_count * target_density)),
+    )
+    ranked_indexes = np.argsort(note_scores)[::-1]
+    selected_indexes = sorted(
+        int(index) for index in ranked_indexes[:target_note_count]
+    )
+    selected_scores = np.asarray(
+        [note_scores[index] for index in selected_indexes],
+        dtype=np.float64,
+    )
+    double_note_threshold = float(np.percentile(selected_scores, 90))
+    remaining_double_notes = max(
+        1,
+        round(target_note_count * _AUTO_PATTERN_DOUBLE_NOTE_RATIO),
+    )
+
+    left_notes: list[int] = []
+    right_notes: list[int] = []
+    next_lane = "left"
+    left_count = 0
+    right_count = 0
+    last_double_index = -_AUTO_PATTERN_DOUBLE_NOTE_MIN_GAP - 1
+
+    for index in selected_indexes:
+        beat_time_ms = int(beat_times[index])
+        is_double_note = (
+            remaining_double_notes > 0
+            and note_scores[index] >= double_note_threshold
+            and low_band_scores[index] >= _AUTO_PATTERN_DOUBLE_NOTE_LOW_BAND_THRESHOLD
+            and (index - last_double_index) > _AUTO_PATTERN_DOUBLE_NOTE_MIN_GAP
+        )
+        if is_double_note:
+            left_notes.append(beat_time_ms)
+            right_notes.append(beat_time_ms)
+            left_count += 1
+            right_count += 1
+            remaining_double_notes -= 1
+            last_double_index = index
+            continue
+
+        if left_count < right_count:
+            lane = "left"
+        elif right_count < left_count:
+            lane = "right"
+        else:
+            lane = next_lane
+
+        if lane == "left":
+            left_notes.append(beat_time_ms)
+            left_count += 1
+            next_lane = "right"
+        else:
+            right_notes.append(beat_time_ms)
+            right_count += 1
+            next_lane = "left"
+
+    return sorted(left_notes), sorted(right_notes)
 
 
 def _estimate_bpm_from_intervals(beat_times_sec: np.ndarray) -> float:
@@ -515,4 +644,70 @@ def analyze_chart_audio(song_id: str) -> dict[str, object]:
         "bpm": analysis.tempo_bpm,
         "global_offset_ms": current_chart.global_offset_ms,
         "analysis": analysis.model_dump(mode="json"),
+    }
+
+
+@router.post("/charts/{song_id}/auto-pattern")
+def auto_generate_chart_pattern(song_id: str) -> dict[str, object]:
+    """Generate a beat-balanced jump pattern from audio analysis."""
+    if not _SONG_ID_PATTERN.fullmatch(song_id):
+        raise HTTPException(status_code=400, detail="invalid_song_id")
+
+    song_dir = _charts_root_dir() / song_id
+    chart_path = song_dir / "chart.json"
+    if not chart_path.exists():
+        raise HTTPException(status_code=404, detail="unknown_song_id")
+
+    audio_path = _audio_file_for_song(song_id)
+    if not audio_path:
+        raise HTTPException(status_code=404, detail="audio_not_found")
+
+    try:
+        current_chart = Chart.model_validate_json(
+            chart_path.read_text(encoding="utf-8"),
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=500, detail="failed_to_load_chart") from exc
+
+    analysis_generated = False
+    if current_chart.audio_analysis is None:
+        try:
+            current_chart.audio_analysis = _analyze_audio_with_librosa(audio_path)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="analysis_backend_unavailable",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="audio_analysis_failed",
+            ) from exc
+        current_chart.bpm = current_chart.audio_analysis.tempo_bpm
+        current_chart.global_offset_ms = _estimate_global_offset_ms(
+            current_chart.audio_analysis.beat_times_ms,
+            current_chart.audio_analysis.tempo_bpm,
+        )
+        analysis_generated = True
+
+    if current_chart.audio_analysis is None:
+        raise HTTPException(status_code=500, detail="audio_analysis_missing")
+
+    current_chart.left, current_chart.right = _generate_auto_pattern_from_analysis(
+        current_chart.audio_analysis,
+    )
+    chart_path.write_text(
+        json.dumps(current_chart.model_dump(mode="json", exclude_none=True), indent=2),
+        encoding="utf-8",
+    )
+
+    return {
+        "ok": True,
+        "song_id": song_id,
+        "analysis_generated": analysis_generated,
+        "bpm": current_chart.bpm,
+        "global_offset_ms": current_chart.global_offset_ms,
+        "left": current_chart.left,
+        "right": current_chart.right,
+        "analysis": current_chart.audio_analysis.model_dump(mode="json"),
     }

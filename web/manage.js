@@ -694,6 +694,7 @@ function updateControlStates() {
   setControlEnabled('btn-play-pause', canEdit);
   setControlEnabled('btn-stop-playback', canStop);
   setControlEnabled('btn-tap-bpm', canEdit);
+  setControlEnabled('btn-auto-pattern', hasSong);
   setControlEnabled('btn-analyze-audio', hasSong);
   setControlEnabled('btn-save-chart', hasSong && state.hasUnsavedChartChanges);
   updatePlayPauseButtonLabel();
@@ -819,6 +820,67 @@ async function analyzeAudioMetadata() {
   }
 }
 
+async function autoGeneratePattern() {
+  const status = document.getElementById('save-status');
+  if (!currentSongId) {
+    status.textContent = 'Select a song before generating a pattern';
+    return;
+  }
+
+  status.textContent = 'Generating jump pattern...';
+  setControlEnabled('btn-auto-pattern', false);
+
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/auto-pattern`,
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      const detail = (await response.text()) || response.statusText;
+      throw new Error(detail || 'Pattern generation failed');
+    }
+
+    const payload = await response.json();
+    state.left = (payload.left || []).slice().sort((a, b) => a - b);
+    state.right = (payload.right || []).slice().sort((a, b) => a - b);
+    state.audioAnalysis = payload.analysis || state.audioAnalysis;
+    ensureManageWaveformController()?.invalidateOverviewCache();
+
+    const generatedOffset = Number(payload.global_offset_ms);
+    if (Number.isFinite(generatedOffset)) {
+      state.offset = Math.round(generatedOffset);
+      document.getElementById('global-offset').value = String(state.offset);
+    }
+    const generatedBpm = Number(payload.bpm);
+    if (Number.isFinite(generatedBpm) && generatedBpm > 0) {
+      state.bpm = generatedBpm;
+      document.getElementById('song-bpm').value = String(generatedBpm);
+    }
+    const descriptors = state.audioAnalysis?.beat_descriptors;
+    if (Array.isArray(descriptors) && descriptors.length > 0) {
+      state.spectralRmsMax = Math.max(
+        ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
+        MIN_SPECTRAL_RMS
+      );
+    } else {
+      state.spectralRmsMax = 1;
+    }
+
+    updateBeatGrid();
+    renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
+    setChartDirtyBaseline();
+    status.textContent = 'Generated beat-balanced jump pattern';
+    setTimeout(() => {
+      status.textContent = '';
+    }, 3000);
+  } catch (e) {
+    console.error(e);
+    status.textContent = e instanceof Error ? e.message : 'Pattern generation failed';
+  } finally {
+    updateControlStates();
+  }
+}
+
 function init() {
   document.getElementById('song-edit-select').addEventListener('change', (e) => {
     if (e.target.value) {
@@ -896,6 +958,7 @@ function init() {
     updateBeatGrid();
     refreshChartDirtyState();
   });
+  document.getElementById('btn-auto-pattern').addEventListener('click', autoGeneratePattern);
   
   document.getElementById('btn-analyze-audio').addEventListener('click', analyzeAudioMetadata);
   
