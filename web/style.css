@@ -215,11 +215,22 @@ h2 {
 }
 
 .edit-song-controls {
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+  align-items: end;
 }
 
 .edit-song-controls .controls-menu {
-  align-self: flex-end;
+  align-self: end;
+}
+
+.edit-song-controls #save-status {
+  align-self: end;
+}
+
+.edit-song-controls .accent-button,
+.edit-song-controls .ghost-button {
+  min-block-size: 3.125rem;
 }
 
 #edit-song .controls #song-edit-select {
@@ -414,6 +425,15 @@ h2 {
 @media (max-width: 640px) {
   .timing-input-row {
     grid-template-columns: 1fr;
+  }
+
+  .edit-song-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-song-controls .controls-menu,
+  .edit-song-controls #save-status {
+    justify-self: start;
   }
 }
 
