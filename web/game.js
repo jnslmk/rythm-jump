@@ -50,7 +50,6 @@ function loadStoredGameWaveformZoom() {
 let state = {
   songId: '',
   runStatus: 'idle',
-  lastAction: 'none',
   levels: [0, 0],
   songs: [],
   activeBars: {},
@@ -982,9 +981,6 @@ function resetSessionState() {
 }
 
 function updateUI() {
-  document.getElementById('last-action').textContent = state.lastAction;
-  document.getElementById('run-status').textContent = state.runStatus;
-  
   const select = document.getElementById('song-select');
   if (select.options.length <= 1 && state.songs.length > 0) {
     select.innerHTML = '<option value="">Select a song</option>' + 
@@ -1108,8 +1104,7 @@ function handleKeydown(event) {
   if (!action) return;
 
   event.preventDefault();
-  state.lastAction = action;
-  
+
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({
       type: 'lane_event',
