@@ -321,7 +321,9 @@ def _analyze_audio_with_librosa(audio_path: Path) -> AudioAnalysis:  # noqa: PLR
         )
 
     frame_length_ms = round((_ANALYSIS_HOP_LENGTH / sample_rate_hz) * 1000)
+    duration_ms = round(librosa.get_duration(y=samples, sr=sample_rate_hz) * 1000)
     return AudioAnalysis(
+        duration_ms=max(duration_ms, 1),
         sample_rate_hz=sample_rate_hz,
         hop_length=_ANALYSIS_HOP_LENGTH,
         frame_length_ms=max(frame_length_ms, 1),

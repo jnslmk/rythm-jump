@@ -53,6 +53,7 @@ class AudioAnalysis(BaseModel):
     """Offline audio analysis metadata derived from librosa."""
 
     version: str = "librosa-v1"
+    duration_ms: PositiveInt | None = None
     sample_rate_hz: PositiveInt
     hop_length: PositiveInt
     frame_length_ms: PositiveInt

@@ -142,6 +142,7 @@ function initGameWaveform() {
   gameWaveSurfer.on('ready', () => {
     applyGameWaveformZoom({ preferExisting: true });
     renderGameSpectralWaveform();
+    renderDebugPanel();
   });
   gameWaveSurfer.on('audioprocess', () => {
     renderGameSpectralWaveform();
@@ -183,7 +184,47 @@ function computeChartDuration(chart) {
   return Math.max(leftMax, rightMax) + chart.travel_time_ms;
 }
 
+function getAnalysisDurationMs(chart) {
+  const analysis = chart?.audio_analysis;
+  if (!analysis) {
+    return 0;
+  }
+  const explicitDurationMs = Number(analysis.duration_ms) || 0;
+  if (explicitDurationMs > 0) {
+    return explicitDurationMs;
+  }
+  const beatDurationMs = Array.isArray(analysis.beat_times_ms) && analysis.beat_times_ms.length > 0
+    ? Math.max(...analysis.beat_times_ms.map((value) => Number(value) || 0))
+    : 0;
+  const descriptorDurationMs = Array.isArray(analysis.beat_descriptors)
+    && analysis.beat_descriptors.length > 0
+    ? Math.max(...analysis.beat_descriptors.map((descriptor) => Number(descriptor.time_ms) || 0))
+    : 0;
+  return Math.max(beatDurationMs, descriptorDurationMs);
+}
+
+function computeTrackDuration(chart) {
+  const analysisDurationMs = getAnalysisDurationMs(chart);
+  if (analysisDurationMs > 0) {
+    return analysisDurationMs;
+  }
+  return computeChartDuration(chart);
+}
+
+function getAudioDurationMs() {
+  const audio = ensureAudioElement();
+  const audioDurationMs = (audio?.duration || 0) * 1000;
+  if (Number.isFinite(audioDurationMs) && audioDurationMs > 0) {
+    return audioDurationMs;
+  }
+  return 0;
+}
+
 function resolveWaveformDurationMs() {
+  const audioDurationMs = getAudioDurationMs();
+  if (audioDurationMs > 0) {
+    return audioDurationMs;
+  }
   const waveDurationMs = (gameWaveSurfer?.getDuration?.() || 0) * 1000;
   if (Number.isFinite(waveDurationMs) && waveDurationMs > 0) {
     return waveDurationMs;
@@ -1000,7 +1041,7 @@ async function loadChart(songId) {
     const chartData = await response.json();
     state.chart = chartData;
     ensureGameWaveformController()?.invalidateOverviewCache();
-    state.chartDurationMs = computeChartDuration(chartData);
+    state.chartDurationMs = computeTrackDuration(chartData);
     const descriptors = chartData?.audio_analysis?.beat_descriptors;
     if (Array.isArray(descriptors) && descriptors.length > 0) {
       state.spectralRmsMax = Math.max(

@@ -11,6 +11,7 @@ PERFECT_WINDOW_MS = 50
 GOOD_WINDOW_MS = 100
 NEGATIVE_GLOBAL_OFFSET_MS = -120
 DETECTED_BPM = 128.0
+ANALYSIS_DURATION_MS = 180000
 DEFAULT_LEFT = [1000, 2000, 3000]
 DEFAULT_RIGHT = [1500, 2500]
 
@@ -116,6 +117,7 @@ def test_load_chart_accepts_audio_analysis_metadata(tmp_path: Path) -> None:
     payload = _base_chart_payload()
     payload["audio_analysis"] = {
         "version": "librosa-v1",
+        "duration_ms": ANALYSIS_DURATION_MS,
         "sample_rate_hz": 22050,
         "hop_length": 512,
         "frame_length_ms": 23,
@@ -139,5 +141,6 @@ def test_load_chart_accepts_audio_analysis_metadata(tmp_path: Path) -> None:
     chart = load_chart(_write_chart(tmp_path, payload))
 
     assert chart.audio_analysis is not None
+    assert chart.audio_analysis.duration_ms == ANALYSIS_DURATION_MS
     assert chart.audio_analysis.tempo_bpm == DETECTED_BPM
     assert chart.audio_analysis.beat_descriptors[0].dominant_band == "mid"

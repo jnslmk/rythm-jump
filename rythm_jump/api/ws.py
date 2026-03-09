@@ -1,7 +1,9 @@
 """WebSocket session streaming and lane event delivery for Rhythm Jump."""
 
 import asyncio
+import importlib
 import json
+import warnings
 from contextlib import suppress
 from pathlib import Path
 from typing import TypedDict
@@ -56,7 +58,7 @@ class _PlaybackController:
             await self._task
         self._task = None
 
-    async def start(self, chart: Chart) -> None:
+    async def start(self, chart: Chart, duration_ms: int) -> None:
         """Kick off a new playback run after stopping the previous one."""
         await self.cancel()
         if self._session.state != State.IDLE:
@@ -71,16 +73,16 @@ class _PlaybackController:
                 "state": self._session.state,
             },
         )
-        self._task = asyncio.create_task(self._run_playback(chart))
+        self._task = asyncio.create_task(self._run_playback(chart, duration_ms))
 
-    async def _run_playback(self, chart: Chart) -> None:
+    async def _run_playback(self, chart: Chart, duration_ms: int) -> None:
         left_idx = 0
         right_idx = 0
         left_level = 0.0
         right_level = 0.0
         progress_ms = 0
         travel_time_ms = chart.travel_time_ms
-        duration = _chart_duration_ms(chart)
+        duration = duration_ms
         tick_ms = int(TICK_INTERVAL_S * 1000)
         left_spawn_idx = 0
         right_spawn_idx = 0
@@ -277,6 +279,50 @@ def _chart_duration_ms(chart: Chart) -> int:
     return max(left_max, right_max) + chart.travel_time_ms
 
 
+def _analysis_duration_ms(chart: Chart) -> int:
+    """Return the analyzed song duration when it is present."""
+    analysis = chart.audio_analysis
+    if analysis is None:
+        return 0
+
+    if analysis.duration_ms is not None:
+        return int(analysis.duration_ms)
+
+    beat_max = max(analysis.beat_times_ms, default=0)
+    descriptor_max = max(
+        (descriptor.time_ms for descriptor in analysis.beat_descriptors),
+        default=0,
+    )
+    return max(beat_max, descriptor_max)
+
+
+def _audio_duration_ms(audio_path: Path) -> int:
+    """Return the duration of the audio file in milliseconds."""
+    try:
+        librosa = importlib.import_module("librosa")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            warnings.simplefilter("ignore", DeprecationWarning)
+            duration_s = float(librosa.get_duration(path=str(audio_path)))
+    except (ImportError, OSError, TypeError, ValueError):  # pragma: no cover
+        return 0
+
+    return max(round(duration_s * 1000), 0)
+
+
+def resolve_playback_duration_ms(chart: Chart, audio_path: Path) -> int:
+    """Resolve playback duration from audio first, then metadata fallbacks."""
+    audio_duration_ms = _audio_duration_ms(audio_path)
+    if audio_duration_ms > 0:
+        return audio_duration_ms
+
+    analysis_duration_ms = _analysis_duration_ms(chart)
+    if analysis_duration_ms > 0:
+        return analysis_duration_ms
+
+    return _chart_duration_ms(chart)
+
+
 def _send_clock_ticks(websocket: WebSocket, session_id: str) -> asyncio.Task[None]:
     """Send periodic clock ticks for clients that request them."""
 
@@ -323,7 +369,10 @@ async def _handle_start_session(
         await websocket.send_json({"type": "error", "reason": "chart_load_failed"})
         return
 
-    await playback_controller.start(chart)
+    await playback_controller.start(
+        chart,
+        resolve_playback_duration_ms(chart, audio_path),
+    )
 
 
 async def _handle_stop_session(
