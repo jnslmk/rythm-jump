@@ -40,6 +40,7 @@ class _PlaybackController:
         self._session = session
         self._session_id = session_id
         self._task: asyncio.Task[None] | None = None
+        self._progress_ms = 0
 
     @property
     def session(self) -> GameSession:
@@ -61,6 +62,7 @@ class _PlaybackController:
         if self._session.state != State.IDLE:
             return
 
+        self._progress_ms = 0
         self._session.start()
         await self._websocket.send_json(
             {
@@ -106,7 +108,11 @@ class _PlaybackController:
             return current_index
 
         try:
-            while progress_ms <= duration and self._session.state == State.PLAYING:
+            while progress_ms <= duration and self._session.state != State.IDLE:
+                if self._session.state == State.PAUSED:
+                    await asyncio.sleep(TICK_INTERVAL_S)
+                    continue
+
                 left_spawn_idx = spawn_ready_bars(
                     chart.left,
                     "left",
@@ -144,17 +150,48 @@ class _PlaybackController:
 
                 await asyncio.sleep(TICK_INTERVAL_S)
                 progress_ms += tick_ms
+                self._progress_ms = progress_ms
                 left_level = max(left_level * DECAY_FACTOR, 0.0)
                 right_level = max(right_level * DECAY_FACTOR, 0.0)
         finally:
-            self._session.state = State.IDLE
-            await self._websocket.send_json(
-                {
-                    "type": "session_state",
-                    "session_id": self._session_id,
-                    "state": self._session.state,
-                },
-            )
+            if self._session.state != State.PAUSED:
+                self._session.state = State.IDLE
+                self._progress_ms = 0
+                await self._websocket.send_json(
+                    {
+                        "type": "session_state",
+                        "session_id": self._session_id,
+                        "state": self._session.state,
+                    },
+                )
+
+    async def pause(self) -> None:
+        """Pause the active playback loop without resetting progress."""
+        if self._session.state != State.PLAYING:
+            return
+        self._session.pause()
+        await self._websocket.send_json(
+            {
+                "type": "session_state",
+                "session_id": self._session_id,
+                "state": self._session.state,
+                "progress_ms": self._progress_ms,
+            },
+        )
+
+    async def resume(self) -> None:
+        """Resume a paused playback loop."""
+        if self._session.state != State.PAUSED:
+            return
+        self._session.resume()
+        await self._websocket.send_json(
+            {
+                "type": "session_state",
+                "session_id": self._session_id,
+                "state": self._session.state,
+                "progress_ms": self._progress_ms,
+            },
+        )
 
     async def _emit_lane_events(
         self,
@@ -306,6 +343,75 @@ async def _handle_stop_session(
     )
 
 
+async def _handle_pause_session(
+    playback_controller: _PlaybackController,
+) -> None:
+    """Pause playback without resetting its position."""
+    await playback_controller.pause()
+
+
+async def _handle_resume_session(
+    playback_controller: _PlaybackController,
+) -> None:
+    """Resume playback from the paused position."""
+    await playback_controller.resume()
+
+
+async def _handle_lane_event(
+    message: dict[str, object],
+    websocket: WebSocket,
+    session_id: str,
+    playback_controller: _PlaybackController,
+) -> None:
+    """Forward a lane input to the connected session."""
+    lane = message.get("lane")
+    if lane not in ("left", "right"):
+        return
+    lane_name = str(lane)
+
+    await websocket.send_json(
+        {
+            "type": "lane_event",
+            "session_id": session_id,
+            "lane": lane_name,
+        },
+    )
+    playback_controller.session.handle_input(lane_name)
+
+
+async def _dispatch_session_message(
+    message: dict[str, object],
+    websocket: WebSocket,
+    session_id: str,
+    playback_controller: _PlaybackController,
+) -> bool:
+    """Dispatch one decoded session message and report whether it was handled."""
+    msg_type = message.get("type")
+    handled = True
+
+    if msg_type == "ping":
+        await websocket.send_json({"type": "pong", "session_id": session_id})
+    elif msg_type == "lane_event":
+        await _handle_lane_event(
+            message,
+            websocket,
+            session_id,
+            playback_controller,
+        )
+    elif msg_type == "start_session":
+        await _handle_start_session(message, websocket, playback_controller)
+    elif msg_type == "stop_session":
+        await _handle_stop_session(websocket, session_id, playback_controller)
+    elif msg_type == "pause_session":
+        await _handle_pause_session(playback_controller)
+    elif msg_type == "resume_session":
+        await _handle_resume_session(playback_controller)
+    else:
+        handled = False
+
+    return handled
+
+
 async def _process_session_messages(
     websocket: WebSocket,
     session_id: str,
@@ -324,34 +430,12 @@ async def _process_session_messages(
             await websocket.send_json({"type": "error", "reason": "invalid_payload"})
             continue
 
-        msg_type = message.get("type")
-        if msg_type == "ping":
-            await websocket.send_json({"type": "pong", "session_id": session_id})
-            continue
-
-        if msg_type == "lane_event":
-            lane = message.get("lane")
-            if lane in ("left", "right"):
-                await websocket.send_json(
-                    {
-                        "type": "lane_event",
-                        "session_id": session_id,
-                        "lane": lane,
-                    },
-                )
-                playback_controller.session.handle_input(lane)
-            continue
-
-        if msg_type == "start_session":
-            await _handle_start_session(
-                message,
-                websocket,
-                playback_controller,
-            )
-            continue
-
-        if msg_type == "stop_session":
-            await _handle_stop_session(websocket, session_id, playback_controller)
+        if await _dispatch_session_message(
+            message,
+            websocket,
+            session_id,
+            playback_controller,
+        ):
             continue
 
         await websocket.send_json({"type": "error", "reason": "unknown_type"})

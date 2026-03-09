@@ -90,6 +90,17 @@ def test_ws_session_controls_start_stop(ws_song_library: object) -> None:
                 "state_event did not report that the session is playing",
             )
 
+        websocket.send_json({"type": "pause_session"})
+        paused_event = _receive_event(websocket, "session_state")
+        if paused_event["state"] != "paused":
+            pytest.fail("pause_session did not pause the session")
+
+        websocket.send_json({"type": "resume_session"})
+        resumed_event = _receive_event(websocket, "session_state")
+        if resumed_event["state"] != "playing":
+            pytest.fail("resume_session did not resume the session")
+
         websocket.send_json({"type": "stop_session"})
-        # The implementation currently avoids emitting another state update.
-        # This test exercises the stop command path to ensure it does not crash.
+        stopped_event = _receive_event(websocket, "session_state")
+        if stopped_event["state"] != "idle":
+            pytest.fail("stop_session did not reset the session to idle")

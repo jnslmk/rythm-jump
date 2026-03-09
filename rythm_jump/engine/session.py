@@ -8,6 +8,7 @@ class State(StrEnum):
 
     IDLE = "idle"
     PLAYING = "playing"
+    PAUSED = "paused"
 
 
 class GameSession:
@@ -25,6 +26,16 @@ class GameSession:
     def start_from_contact(self) -> None:
         """Alias to start triggered by a physical contact event."""
         self.start()
+
+    def pause(self) -> None:
+        """Pause the session if it is currently playing."""
+        if self.state == State.PLAYING:
+            self.state = State.PAUSED
+
+    def resume(self) -> None:
+        """Resume the session if it is currently paused."""
+        if self.state == State.PAUSED:
+            self.state = State.PLAYING
 
     def handle_input(self, _lane: str) -> None:
         """Handle a lane input when the session is playing."""

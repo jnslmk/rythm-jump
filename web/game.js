@@ -84,19 +84,24 @@ function isSessionPlaying() {
   return state.runStatus === 'playing';
 }
 
+function isSessionPaused() {
+  return state.runStatus === 'paused';
+}
+
 function updateControlStates() {
   const startBtn = document.getElementById('btn-start');
   const stopBtn = document.getElementById('btn-stop');
   const playing = isSessionPlaying();
+  const paused = isSessionPaused();
 
   if (startBtn) {
-    startBtn.textContent = playing ? 'Pause Game' : 'Start Game';
-    startBtn.classList.toggle('ghost-button', playing);
-    startBtn.classList.toggle('accent-button', !playing);
+    startBtn.textContent = playing ? 'Pause Game' : (paused ? 'Resume Game' : 'Start Game');
+    startBtn.classList.toggle('ghost-button', playing || paused);
+    startBtn.classList.toggle('accent-button', !playing && !paused);
   }
 
   if (stopBtn) {
-    stopBtn.disabled = !playing;
+    stopBtn.disabled = !playing && !paused;
   }
 }
 
@@ -153,6 +158,24 @@ function requestStopSession(clearScreen) {
     resetSessionState();
   }
   state.runStatus = 'idle';
+  updateUI();
+}
+
+function requestPauseSession() {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'pause_session' }));
+  }
+  ensureAudioElement().pause();
+  state.runStatus = 'paused';
+  updateUI();
+}
+
+async function requestResumeSession() {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'resume_session' }));
+  }
+  await startAudioPlayback(state.songId, state.sessionProgressMs);
+  state.runStatus = 'playing';
   updateUI();
 }
 
@@ -1003,6 +1026,9 @@ function connectWebSocket() {
       const payload = JSON.parse(event.data);
       if (payload.type === 'session_state') {
         state.runStatus = payload.state;
+        if (typeof payload.progress_ms === 'number') {
+          state.sessionProgressMs = payload.progress_ms;
+        }
         updateUI();
         renderDebugPanel();
         return;
@@ -1130,18 +1156,15 @@ function ensureAudioElement() {
   return audioElement;
 }
 
-async function startAudioPlayback(songId) {
+async function startAudioPlayback(songId, startMs = 0) {
   const audio = ensureAudioElement();
-  if (state.spectralMode === 'live') {
-    ensureLiveAnalyzer(audio);
-    if (analyzerContext?.state === 'suspended') {
-      await analyzerContext.resume();
-    }
-  }
   audio.pause();
-  audio.currentTime = 0;
-  audio.src = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
-  audio.load();
+  const nextSrc = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
+  if (audio.src !== new URL(nextSrc, window.location.href).href) {
+    audio.src = nextSrc;
+    audio.load();
+  }
+  audio.currentTime = Math.max(startMs, 0) / 1000;
   const previousMuted = audio.muted;
   audio.muted = true;
   try {
@@ -1156,7 +1179,12 @@ function init() {
   if (startButton) {
     startButton.addEventListener('click', async () => {
       if (isSessionPlaying()) {
-        requestStopSession(false);
+        requestPauseSession();
+        return;
+      }
+
+      if (isSessionPaused()) {
+        await requestResumeSession();
         return;
       }
 
@@ -1177,7 +1205,7 @@ function init() {
         renderDebugPanel();
 
         try {
-          await startAudioPlayback(songId);
+          await startAudioPlayback(songId, 0);
         } catch (error) {
           console.error('Playback failed', error);
           state.runStatus = 'Playback blocked';
@@ -1198,7 +1226,7 @@ function init() {
   const stopButton = document.getElementById('btn-stop');
   if (stopButton) {
     stopButton.addEventListener('click', () => {
-      if (!isSessionPlaying()) return;
+      if (!isSessionPlaying() && !isSessionPaused()) return;
       requestStopSession(true);
     });
   }
