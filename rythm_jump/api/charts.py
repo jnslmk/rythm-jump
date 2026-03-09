@@ -669,10 +669,12 @@ def auto_generate_chart_pattern(song_id: str) -> dict[str, object]:
     except ValidationError as exc:
         raise HTTPException(status_code=500, detail="failed_to_load_chart") from exc
 
+    generated_chart = current_chart.model_copy(deep=True)
+
     analysis_generated = False
-    if current_chart.audio_analysis is None:
+    if generated_chart.audio_analysis is None:
         try:
-            current_chart.audio_analysis = _analyze_audio_with_librosa(audio_path)
+            generated_chart.audio_analysis = _analyze_audio_with_librosa(audio_path)
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=500,
@@ -683,31 +685,27 @@ def auto_generate_chart_pattern(song_id: str) -> dict[str, object]:
                 status_code=500,
                 detail="audio_analysis_failed",
             ) from exc
-        current_chart.bpm = current_chart.audio_analysis.tempo_bpm
-        current_chart.global_offset_ms = _estimate_global_offset_ms(
-            current_chart.audio_analysis.beat_times_ms,
-            current_chart.audio_analysis.tempo_bpm,
+        generated_chart.bpm = generated_chart.audio_analysis.tempo_bpm
+        generated_chart.global_offset_ms = _estimate_global_offset_ms(
+            generated_chart.audio_analysis.beat_times_ms,
+            generated_chart.audio_analysis.tempo_bpm,
         )
         analysis_generated = True
 
-    if current_chart.audio_analysis is None:
+    if generated_chart.audio_analysis is None:
         raise HTTPException(status_code=500, detail="audio_analysis_missing")
 
-    current_chart.left, current_chart.right = _generate_auto_pattern_from_analysis(
-        current_chart.audio_analysis,
-    )
-    chart_path.write_text(
-        json.dumps(current_chart.model_dump(mode="json", exclude_none=True), indent=2),
-        encoding="utf-8",
+    generated_chart.left, generated_chart.right = _generate_auto_pattern_from_analysis(
+        generated_chart.audio_analysis,
     )
 
     return {
         "ok": True,
         "song_id": song_id,
         "analysis_generated": analysis_generated,
-        "bpm": current_chart.bpm,
-        "global_offset_ms": current_chart.global_offset_ms,
-        "left": current_chart.left,
-        "right": current_chart.right,
-        "analysis": current_chart.audio_analysis.model_dump(mode="json"),
+        "bpm": generated_chart.bpm,
+        "global_offset_ms": generated_chart.global_offset_ms,
+        "left": generated_chart.left,
+        "right": generated_chart.right,
+        "analysis": generated_chart.audio_analysis.model_dump(mode="json"),
     }

@@ -871,8 +871,8 @@ async function autoGeneratePattern() {
 
     updateBeatGrid();
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
-    setChartDirtyBaseline();
-    status.textContent = 'Generated beat-balanced jump pattern';
+    refreshChartDirtyState();
+    status.textContent = 'Generated beat-balanced jump pattern (not saved)';
     setTimeout(() => {
       status.textContent = '';
     }, 3000);

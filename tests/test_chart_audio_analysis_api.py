@@ -128,7 +128,7 @@ def test_get_tempo_uses_librosa_analysis(
     assert response.json() == {"bpm": DETECTED_BPM}
 
 
-def test_post_auto_pattern_persists_generated_notes(
+def test_post_auto_pattern_returns_generated_notes_without_persisting(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -155,5 +155,5 @@ def test_post_auto_pattern_persists_generated_notes(
     assert abs(len(generated["left"]) - len(generated["right"])) <= 1
 
     persisted = json.loads(chart_path.read_text(encoding="utf-8"))
-    assert persisted["left"] == generated["left"]
-    assert persisted["right"] == generated["right"]
+    assert persisted["left"] == payload["left"]
+    assert persisted["right"] == payload["right"]

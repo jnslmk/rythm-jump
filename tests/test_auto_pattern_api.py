@@ -75,7 +75,7 @@ def _chart_payload(song_id: str) -> dict[str, object]:
     }
 
 
-def test_auto_pattern_generation_prefers_strong_low_band_beats_and_balances_lanes(
+def test_auto_pattern_generation_prefers_strong_low_band_beats_and_keeps_chart_unsaved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -108,6 +108,6 @@ def test_auto_pattern_generation_prefers_strong_low_band_beats_and_balances_lane
     assert abs(len(payload["left"]) - len(payload["right"])) <= 1
 
     persisted = json.loads(chart_path.read_text(encoding="utf-8"))
-    assert persisted["left"] == payload["left"]
-    assert persisted["right"] == payload["right"]
-    assert persisted["audio_analysis"]["version"] == "librosa-v1"
+    assert persisted["left"] == []
+    assert persisted["right"] == []
+    assert "audio_analysis" not in persisted
