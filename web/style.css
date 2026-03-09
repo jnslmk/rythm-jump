@@ -201,6 +201,19 @@ h2 {
   align-items: center;
 }
 
+.game-session-controls {
+  align-items: flex-end;
+}
+
+.game-session-controls .controls-menu {
+  align-self: flex-end;
+}
+
+.game-session-controls .accent-button,
+.game-session-controls .ghost-button {
+  min-block-size: 3.125rem;
+}
+
 #edit-song .controls #song-edit-select {
   flex: 1 1 280px;
 }
