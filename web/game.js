@@ -2,7 +2,6 @@ const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
 const CLOCK_DECAY = 0.85;
 const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
-const SPECTRAL_MODE_STORAGE_KEY = 'rhythmJumpSpectralMode';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
 const MIN_SPECTRAL_RMS = 0.001;
@@ -31,14 +30,6 @@ function loadDebugVisibility() {
   return stored === 'true';
 }
 
-function loadSpectralMode() {
-  const stored = localStorage.getItem(SPECTRAL_MODE_STORAGE_KEY);
-  if (stored === 'live' || stored === 'off') {
-    return stored;
-  }
-  return 'precomputed';
-}
-
 function loadStoredGameWaveformZoom() {
   const stored = Number(localStorage.getItem(GAME_WAVEFORM_ZOOM_STORAGE_KEY));
   if (!Number.isFinite(stored) || stored < GAME_WAVEFORM_ZOOM_MIN) {
@@ -59,7 +50,6 @@ let state = {
   sessionProgressMs: 0,
   chart: null,
   chartDurationMs: 0,
-  spectralMode: loadSpectralMode(),
   spectralRmsMax: 1,
   debugVisible: loadDebugVisibility(),
   sessionStartMs: null,
@@ -70,10 +60,6 @@ let state = {
 };
 
 let gameWaveSurfer = null;
-let analyzerContext = null;
-let analyzerNode = null;
-let analyzerData = null;
-let audioSourceNode = null;
 let isGameWaveformDragging = false;
 let gameWaveformDragStartX = 0;
 let gameWaveformDragStartLeft = 0;
@@ -105,48 +91,10 @@ function updateControlStates() {
   }
 }
 
-function updateSpectralModeSelector() {
-  const select = document.getElementById('spectral-mode-select');
-  if (!select) return;
-  select.value = state.spectralMode;
-}
-
-function setSpectralMode(mode) {
-  const supported = ['precomputed', 'live', 'off'];
-  if (!supported.includes(mode)) {
-    return;
-  }
-  state.spectralMode = mode;
-  localStorage.setItem(SPECTRAL_MODE_STORAGE_KEY, mode);
-  updateSpectralModeSelector();
-  renderGameSpectralWaveform();
-}
-
 function stopAudioPlayback() {
   const audio = ensureAudioElement();
   audio.pause();
   audio.currentTime = 0;
-}
-
-function ensureLiveAnalyzer(audio) {
-  if (typeof window.AudioContext === 'undefined' && typeof window.webkitAudioContext === 'undefined') {
-    return;
-  }
-  if (!analyzerContext) {
-    const ContextCtor = window.AudioContext || window.webkitAudioContext;
-    analyzerContext = new ContextCtor();
-    analyzerNode = analyzerContext.createAnalyser();
-    analyzerNode.fftSize = 512;
-    analyzerNode.smoothingTimeConstant = 0.8;
-  }
-  if (!audioSourceNode) {
-    audioSourceNode = analyzerContext.createMediaElementSource(audio);
-    audioSourceNode.connect(analyzerNode);
-    analyzerNode.connect(analyzerContext.destination);
-  }
-  if (!analyzerData || analyzerData.length !== analyzerNode.frequencyBinCount) {
-    analyzerData = new Uint8Array(analyzerNode.frequencyBinCount);
-  }
 }
 
 function requestStopSession(clearScreen) {
@@ -755,56 +703,6 @@ function reduceStreamLevels(levels, event) {
   return levels;
 }
 
-function renderPrecomputedSpectralOverlay(ctx, width, overlayHeight) {
-  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
-  if (!Array.isArray(descriptors) || descriptors.length === 0 || state.chartDurationMs <= 0) {
-    return;
-  }
-
-  const progressMs = state.sessionProgressMs || 0;
-  const rmsMax = state.spectralRmsMax || 1;
-  for (const descriptor of descriptors) {
-    const x = 10 + ((descriptor.time_ms || 0) / state.chartDurationMs) * (width - 20);
-    const rmsRatio = Math.max(0, Math.min((descriptor.rms || 0) / rmsMax, 1));
-    const height = 2 + rmsRatio * (overlayHeight - 4);
-    const ageMs = Math.abs(progressMs - (descriptor.time_ms || 0));
-    const emphasis = ageMs < 160 ? 1 : 0.55;
-    ctx.fillStyle = descriptor.color_hint || '#2dd4bf';
-    ctx.globalAlpha = emphasis;
-    ctx.fillRect(x, overlayHeight - height, 2, height);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function renderLiveSpectralOverlay(ctx, width, overlayHeight) {
-  if (!analyzerNode || !analyzerData) {
-    return;
-  }
-  analyzerNode.getByteFrequencyData(analyzerData);
-  const barWidth = Math.max(width / analyzerData.length, 1);
-  for (let i = 0; i < analyzerData.length; i += 1) {
-    const level = analyzerData[i] / 255;
-    const hue = Math.round((i / analyzerData.length) * 330);
-    const alpha = Math.max(level, 0.15);
-    ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
-    const x = i * barWidth;
-    const barHeight = Math.max(level * overlayHeight, 1);
-    ctx.fillRect(x, overlayHeight - barHeight, Math.ceil(barWidth), barHeight);
-  }
-}
-
-function renderSpectralOverlay(ctx, width, height) {
-  if (state.spectralMode === 'off') {
-    return;
-  }
-  const overlayHeight = Math.min(30, Math.max(16, Math.round(height * 0.4)));
-  if (state.spectralMode === 'live') {
-    renderLiveSpectralOverlay(ctx, width, overlayHeight);
-    return;
-  }
-  renderPrecomputedSpectralOverlay(ctx, width, overlayHeight);
-}
-
 function renderVisualizer() {
   const canvas = document.getElementById('visualizer');
   if (!canvas) return;
@@ -820,7 +718,6 @@ function renderVisualizer() {
   // Background
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, width, height);
-  renderSpectralOverlay(ctx, width, height);
 
   // LED Strip Representation
   const numLeds = 70;
@@ -1241,15 +1138,7 @@ function init() {
     setDebugVisibility(!state.debugVisible);
   });
 
-  const spectralModeSelect = document.getElementById('spectral-mode-select');
-  if (spectralModeSelect) {
-    spectralModeSelect.addEventListener('change', (event) => {
-      setSpectralMode(event.target.value);
-    });
-  }
-
   setDebugVisibility(state.debugVisible);
-  updateSpectralModeSelector();
   renderDebugPanel();
   initGameWaveform();
   applyGameWaveformZoom({ preferExisting: true });

@@ -173,10 +173,6 @@ h2 {
   flex: 1 1 280px;
 }
 
-.spectral-controls label {
-  min-width: 220px;
-}
-
 .bpm-controls {
   display: flex;
   flex-direction: column;
