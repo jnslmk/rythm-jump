@@ -69,7 +69,21 @@
     };
   }
 
+  function getPlaybackAlignedBarProgressMs(hitTimeMs, travelTimeMs, playbackMs, fallbackProgressMs) {
+    const safeTravelMs = Math.max(Number(travelTimeMs) || 0, 1);
+    const fallbackProgress = Math.min(Math.max(Number(fallbackProgressMs) || 0, 0), safeTravelMs);
+    const safePlaybackMs = Number(playbackMs);
+    if (!Number.isFinite(safePlaybackMs) || safePlaybackMs < 0) {
+      return fallbackProgress;
+    }
+
+    const safeHitTimeMs = Math.max(Number(hitTimeMs) || 0, 0);
+    const spawnMs = Math.max(safeHitTimeMs - safeTravelMs, 0);
+    return Math.min(Math.max(safePlaybackMs - spawnMs, 0), safeTravelMs);
+  }
+
   return {
+    getPlaybackAlignedBarProgressMs,
     getRenderedBarRange,
     projectBarHeadIndex,
   };

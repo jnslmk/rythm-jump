@@ -678,6 +678,10 @@ function hasActiveHitEffects() {
   return state.hitEffects.left.length > 0 || state.hitEffects.right.length > 0;
 }
 
+function hasActiveBarAnimations() {
+  return Object.keys(state.activeBars).length > 0 && isSessionPlaying();
+}
+
 function scheduleVisualizerEffectRender() {
   if (visualizerEffectRafId) {
     return;
@@ -685,7 +689,7 @@ function scheduleVisualizerEffectRender() {
   visualizerEffectRafId = window.requestAnimationFrame(() => {
     visualizerEffectRafId = 0;
     renderVisualizer();
-    if (hasActiveHitEffects()) {
+    if (hasActiveHitEffects() || hasActiveBarAnimations()) {
       scheduleVisualizerEffectRender();
     }
   });
@@ -800,7 +804,13 @@ function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   const barSpan = getMovingBarLedSpan(numLeds);
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
-    const ratio = Math.min(Math.max(bar.progress_ms / travelMs, 0), 1);
+    const progressMs = VisualizerProjection.getPlaybackAlignedBarProgressMs(
+      bar.hit_time_ms,
+      travelMs,
+      resolveCurrentPlaybackMs(),
+      bar.progress_ms
+    );
+    const ratio = Math.min(Math.max(progressMs / travelMs, 0), 1);
     const ledRange = VisualizerProjection.getRenderedBarRange(
       numLeds,
       ratio,
@@ -1008,6 +1018,7 @@ function handleBarFrame(payload) {
   state.remainingMs = Math.max(payload.remaining_ms, 0);
   renderVisualizer();
   renderDebugPanel();
+  scheduleVisualizerEffectRender();
 }
 
 function recordButtonPress(lane) {

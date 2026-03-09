@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getPlaybackAlignedBarProgressMs,
   getRenderedBarRange,
   projectBarHeadIndex,
 } = require('../web/visualizer-projection.js');
@@ -27,4 +28,14 @@ test('progress is clipped before projection', () => {
 test('completed bars no longer leave an edge pixel lit', () => {
   assert.equal(getRenderedBarRange(70, 1, 'left', 4), null);
   assert.equal(getRenderedBarRange(70, 1, 'right', 4), null);
+});
+
+test('playback-aligned progress matches the audio clock', () => {
+  assert.equal(getPlaybackAlignedBarProgressMs(1000, 400, 600, 0), 0);
+  assert.equal(getPlaybackAlignedBarProgressMs(1000, 400, 850, 0), 250);
+  assert.equal(getPlaybackAlignedBarProgressMs(1000, 400, 1200, 0), 400);
+});
+
+test('playback-aligned progress falls back to server progress without audio time', () => {
+  assert.equal(getPlaybackAlignedBarProgressMs(1000, 400, Number.NaN, 125), 125);
 });
