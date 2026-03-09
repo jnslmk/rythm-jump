@@ -843,6 +843,8 @@ function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, l
 function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   void canvasWidth;
   const barSpan = getMovingBarLedSpan(numLeds);
+  const barHeight = ledHeight + 6;
+  const barY = Math.max(ledY - 3, 0);
   const nowMs = performance.now();
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
@@ -863,14 +865,26 @@ function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
       return;
     }
 
-    for (let ledIndex = ledRange.startIndex; ledIndex <= ledRange.endIndex; ledIndex += 1) {
-      const x = 10 + ledIndex * ledWidth;
-      ctx.fillStyle = bar.lane === 'left'
-        ? 'rgba(96, 165, 250, 0.95)'
-        : 'rgba(244, 114, 182, 0.95)';
-      ctx.fillRect(x, ledY, ledWidth - 2, ledHeight);
-    }
+    const fillColor = bar.lane === 'left'
+      ? 'rgba(125, 211, 252, 1)'
+      : 'rgba(251, 113, 133, 1)';
+    const strokeColor = bar.lane === 'left'
+      ? 'rgba(224, 242, 254, 0.95)'
+      : 'rgba(255, 228, 230, 0.95)';
+    const startX = 10 + (ledRange.startIndex * ledWidth);
+    const barWidth = ((ledRange.endIndex - ledRange.startIndex + 1) * ledWidth) - 1;
+
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = fillColor;
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(startX, barY, barWidth, barHeight);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(startX + 0.75, barY + 0.75, Math.max(barWidth - 1.5, 1), Math.max(barHeight - 1.5, 1));
   });
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
 }
 
 function getJudgementEffectColor(judgement, alpha) {
