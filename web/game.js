@@ -915,6 +915,53 @@ function renderTimelineList(containerId, entries, formatter) {
     .join('');
 }
 
+function formatDeltaMs(deltaMs) {
+  if (!Number.isFinite(deltaMs)) {
+    return 'no chart hit';
+  }
+  const roundedMs = Math.round(deltaMs);
+  if (roundedMs === 0) {
+    return 'on time';
+  }
+  return roundedMs > 0 ? `${roundedMs} ms late` : `${Math.abs(roundedMs)} ms early`;
+}
+
+function renderLaneLogEntry(entry) {
+  if (entry.kind === 'trigger') {
+    return [
+      '<span class="timeline-badge trigger">Trigger</span>',
+      `<span class="timeline-main">@${formatMs(entry.hitTimeMs)}</span>`,
+      `<span class="timeline-meta">${entry.remainingMs} ms left</span>`
+    ].join('');
+  }
+
+  return [
+    '<span class="timeline-badge press">Press</span>',
+    `<span class="timeline-badge ${entry.judgement}">${entry.judgement}</span>`,
+    `<span class="timeline-main">@${entry.label}</span>`,
+    `<span class="timeline-meta">${entry.triggerHit ? 'hit' : 'miss'} · ${formatDeltaMs(entry.deltaMs)}</span>`
+  ].join('');
+}
+
+function renderLaneLog(containerId, lane) {
+  const entries = [
+    ...state.triggerTimeline[lane].map((entry) => ({
+      ...entry,
+      kind: 'trigger',
+      sortTimeMs: entry.hitTimeMs
+    })),
+    ...state.pressTimeline[lane].map((entry) => ({
+      ...entry,
+      kind: 'press',
+      sortTimeMs: entry.pressMs ?? 0
+    }))
+  ]
+    .sort((leftEntry, rightEntry) => rightEntry.sortTimeMs - leftEntry.sortTimeMs)
+    .slice(0, MAX_TIMELINE_ENTRIES);
+
+  renderTimelineList(containerId, entries, renderLaneLogEntry);
+}
+
 function setDebugVisibility(visible) {
   state.debugVisible = Boolean(visible);
   localStorage.setItem(DEBUG_STORAGE_KEY, state.debugVisible ? 'true' : 'false');
@@ -953,28 +1000,8 @@ function renderDebugPanel() {
     }
   }
 
-  renderTimelineList(
-    'left-trigger-timeline',
-    state.triggerTimeline.left,
-    (entry) =>
-      `Trigger @${formatMs(entry.hitTimeMs)} (progress ${entry.progressMs} ms · remaining ${entry.remainingMs} ms)`
-  );
-  renderTimelineList(
-    'right-trigger-timeline',
-    state.triggerTimeline.right,
-    (entry) =>
-      `Trigger @${formatMs(entry.hitTimeMs)} (progress ${entry.progressMs} ms · remaining ${entry.remainingMs} ms)`
-  );
-  renderTimelineList(
-    'left-press-timeline',
-    state.pressTimeline.left,
-    (entry) => `Press @${entry.label} (${entry.source})`
-  );
-  renderTimelineList(
-    'right-press-timeline',
-    state.pressTimeline.right,
-    (entry) => `Press @${entry.label} (${entry.source})`
-  );
+  renderLaneLog('left-lane-log', 'left');
+  renderLaneLog('right-lane-log', 'right');
 }
 
 function handleBarFrame(payload) {
@@ -1006,6 +1033,7 @@ function recordButtonPress(lane) {
   const judgementResult = judgePressTiming(lane);
   const entry = {
     label: formatMs(judgementResult.pressMs),
+    pressMs: judgementResult.pressMs,
     source: 'keyboard',
     deltaMs: judgementResult.deltaMs,
     judgement: judgementResult.judgement,
