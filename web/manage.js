@@ -1086,12 +1086,27 @@ function updateControlStates() {
   const hasSong = Boolean(currentSongId);
   const hasWave = Boolean(wavesurfer);
   const canEdit = hasSong && hasWave;
+  const canStop = canEdit && ((wavesurfer?.getCurrentTime?.() || 0) > 0 || isWavePlaying);
 
   setControlEnabled('btn-play-pause', canEdit);
+  setControlEnabled('btn-stop-playback', canStop);
   setControlEnabled('btn-tap-bpm', canEdit);
   setControlEnabled('btn-analyze-audio', hasSong);
   setControlEnabled('btn-save-chart', hasSong && state.hasUnsavedChartChanges);
   updatePlayPauseButtonLabel();
+}
+
+function stopManagePlayback() {
+  if (!wavesurfer) {
+    return;
+  }
+  wavesurfer.pause();
+  wavesurfer.setTime(0);
+  isWavePlaying = false;
+  document.getElementById('audio-time').textContent =
+    `0:00 / ${formatTime(wavesurfer.getDuration())}`;
+  renderManageSpectralWaveform(0);
+  updateControlStates();
 }
 
 function tapBpm() {
@@ -1265,6 +1280,10 @@ function init() {
   
   document.getElementById('btn-play-pause').addEventListener('click', () => {
     if (wavesurfer) wavesurfer.playPause();
+  });
+
+  document.getElementById('btn-stop-playback').addEventListener('click', () => {
+    stopManagePlayback();
   });
   
   document.getElementById('btn-tap-bpm').addEventListener('click', () => {
