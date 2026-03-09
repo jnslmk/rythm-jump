@@ -36,11 +36,16 @@
           <h2>Choose Song</h2>
         </header>
         <div class="controls flex-gap">
-          <select id="song-select" aria-label="Select Song" class="input-control">
-            <option value="">Loading songs...</option>
-          </select>
-          <button id="btn-start" type="button" class="accent-button">Start Game</button>
-          <button id="btn-stop" type="button" class="ghost-button">Stop</button>
+          <label class="song-select-field">
+            <span class="label">Song</span>
+            <select id="song-select" aria-label="Select Song" class="input-control">
+              <option value="">Loading songs...</option>
+            </select>
+          </label>
+          <menu class="buttons controls-menu" aria-label="Session controls">
+            <li><button id="btn-start" type="button" class="accent-button">Start Game</button></li>
+            <li><button id="btn-stop" type="button" class="ghost-button">Stop</button></li>
+          </menu>
         </div>
       </section>
 
@@ -95,45 +100,58 @@
           height="70"
           aria-label="LED Strip Visualization"
         ></canvas>
-        <p class="game-meta-row hint">
-          <span>Keyboard: A/Space (Left), L/Enter (Right)</span>
-          <span>Current: <span id="game-current-time">--</span></span>
-          <span>Length: <span id="game-track-length">--</span></span>
-        </p>
+        <dl class="game-meta-row hint">
+          <div>
+            <dt class="label">Keyboard</dt>
+            <dd>A/Space (Left), L/Enter (Right)</dd>
+          </div>
+          <div>
+            <dt class="label">Current</dt>
+            <dd id="game-current-time">--</dd>
+          </div>
+          <div>
+            <dt class="label">Length</dt>
+            <dd id="game-track-length">--</dd>
+          </div>
+        </dl>
       </section>
 
       <div class="surface surface-plain debug-toggle-wrapper">
         <button id="btn-toggle-debug" class="ghost ghost-button" type="button">Hide overlay</button>
       </div>
 
-      <section id="debug-panel" class="surface surface-plain debug-panel" aria-labelledby="debug-overlay-title">
+      <aside id="debug-panel" class="surface surface-plain debug-panel" aria-labelledby="debug-overlay-title">
         <header class="debug-header">
           <h2 id="debug-overlay-title">Debug Overlay</h2>
         </header>
         <div class="debug-body">
-          <div class="debug-row">
+          <dl class="debug-row">
             <div>
-              <span class="label">Remaining play time:</span>
-              <span id="debug-remaining-time">--</span>
+              <dt class="label">Remaining play time</dt>
+              <dd id="debug-remaining-time">--</dd>
             </div>
             <div class="timing-windows">
-              <span class="label">Timing zones:</span>
-              <span id="debug-perfect-window">Perfect ±0 ms</span>
-              <span id="debug-good-window">Good ±0 ms</span>
+              <dt class="label">Timing zones</dt>
+              <dd id="debug-perfect-window">Perfect ±0 ms</dd>
+              <dd id="debug-good-window">Good ±0 ms</dd>
             </div>
-          </div>
+          </dl>
           <div class="lane-panels">
-            <section class="lane-panel" aria-labelledby="left-lane-title">
-              <h3 id="left-lane-title" class="lane-title">Left Lane</h3>
+            <article class="lane-panel" aria-labelledby="left-lane-title">
+              <header>
+                <h3 id="left-lane-title" class="lane-title">Left Lane</h3>
+              </header>
               <div id="left-lane-log" class="timeline-list"></div>
-            </section>
-            <section class="lane-panel" aria-labelledby="right-lane-title">
-              <h3 id="right-lane-title" class="lane-title">Right Lane</h3>
+            </article>
+            <article class="lane-panel" aria-labelledby="right-lane-title">
+              <header>
+                <h3 id="right-lane-title" class="lane-title">Right Lane</h3>
+              </header>
               <div id="right-lane-log" class="timeline-list"></div>
-            </section>
+            </article>
           </div>
         </div>
-      </section>
+      </aside>
     </main>
     <audio id="song-audio" preload="auto" hidden></audio>
     <script src="visualizer-projection.js"></script>

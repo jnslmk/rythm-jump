@@ -55,10 +55,15 @@
           <h2>Select Song to Edit</h2>
         </header>
         <div class="controls flex-gap">
-          <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
-            <option value="">Loading songs...</option>
-          </select>
-          <button id="btn-save-chart" class="accent-button">Save Chart</button>
+          <label class="song-select-field">
+            <span class="label">Song</span>
+            <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
+              <option value="">Loading songs...</option>
+            </select>
+          </label>
+          <menu class="buttons controls-menu" aria-label="Chart actions">
+            <li><button id="btn-save-chart" class="accent-button">Save Chart</button></li>
+          </menu>
           <output id="save-status" role="status" aria-live="polite"></output>
         </div>
       </section>
@@ -100,11 +105,11 @@
             </div>
           </div>
           <div id="timeline"></div>
-          <div class="editor-controls">
-            <button id="btn-play-pause" class="accent-button">Play</button>
-            <button id="btn-stop-playback" class="ghost ghost-button" type="button">Stop</button>
-            <output id="audio-time">0:00 / 0:00</output>
-          </div>
+          <menu class="editor-controls buttons" aria-label="Playback controls">
+            <li><button id="btn-play-pause" class="accent-button">Play</button></li>
+            <li><button id="btn-stop-playback" class="ghost ghost-button" type="button">Stop</button></li>
+            <li class="editor-status-item"><output id="audio-time">0:00 / 0:00</output></li>
+          </menu>
         </div>
 
         <div class="bpm-controls">
@@ -120,10 +125,10 @@
                 <input id="global-offset" type="number" value="0" class="input-control" />
               </label>
             </div>
-            <div class="bpm-actions">
-              <button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button>
-              <button id="btn-analyze-audio" type="button" class="ghost ghost-button">Analyze Song</button>
-            </div>
+            <menu class="bpm-actions buttons" aria-label="Timing tools">
+              <li><button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button></li>
+              <li><button id="btn-analyze-audio" type="button" class="ghost ghost-button">Analyze Song</button></li>
+            </menu>
           </fieldset>
         </div>
       </section>
