@@ -56,32 +56,34 @@
         
         <div id="waveform-container">
           <div id="waveform"></div>
-          <div
-            id="spectral-waveform-scroll"
-            class="spectral-waveform-scroll"
-            title="Use mouse wheel to zoom waveform"
-          >
-            <canvas
-              id="manage-spectral-waveform"
-              class="spectral-waveform"
-              width="960"
-              height="88"
-              aria-label="Colored spectral waveform"
-            ></canvas>
-            <div class="zoom-beat-grid-wrap">
-              <div id="zoom-beat-grid" class="zoom-beat-grid" role="grid" aria-label="1/2 beat grid for note placement">
-                <p class="beat-grid-empty">Beat grid will appear after a song loads.</p>
+          <div class="waveform-composite">
+            <div
+              id="spectral-waveform-scroll"
+              class="spectral-waveform-scroll"
+              title="Use mouse wheel to zoom waveform"
+            >
+              <canvas
+                id="manage-spectral-waveform"
+                class="spectral-waveform"
+                width="960"
+                height="88"
+                aria-label="Colored spectral waveform"
+              ></canvas>
+              <div class="zoom-beat-grid-wrap">
+                <div id="zoom-beat-grid" class="zoom-beat-grid" role="grid" aria-label="1/2 beat grid for note placement">
+                  <p class="beat-grid-empty">Beat grid will appear after a song loads.</p>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="overview-waveform-wrap">
-            <canvas
-              id="manage-spectral-waveform-overview"
-              class="spectral-waveform spectral-waveform-overview"
-              width="960"
-              height="72"
-              aria-label="Full song waveform with current zoom window"
-            ></canvas>
+            <div class="overview-waveform-wrap">
+              <canvas
+                id="manage-spectral-waveform-overview"
+                class="spectral-waveform spectral-waveform-overview"
+                width="960"
+                height="72"
+                aria-label="Full song waveform with current zoom window"
+              ></canvas>
+            </div>
           </div>
           <div id="timeline"></div>
           <div class="editor-controls">

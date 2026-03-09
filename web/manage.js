@@ -698,14 +698,15 @@ function renderSpectralWaveformCanvas(canvas, progressMs = 0, options = {}) {
     return;
   }
 
-  // Avoid collapsing the draw buffer while the editor section is hidden.
-  if (canvas.clientWidth < 2 || canvas.clientHeight < 2) {
+  const width = Math.max(canvas.clientWidth || canvas.width || 0, 1);
+  const height = Math.max(canvas.clientHeight || canvas.height || 0, 1);
+
+  // Avoid drawing while no meaningful canvas size exists (e.g. hidden layout with no buffer).
+  if (width < 2 || height < 2) {
     return;
   }
 
   const ctx = canvas.getContext('2d');
-  const width = Math.max(canvas.clientWidth, 1);
-  const height = Math.max(canvas.clientHeight, 1);
   if (canvas.width !== width) {
     canvas.width = width;
   }
@@ -1283,9 +1284,6 @@ function init() {
   waveformScroll.addEventListener('scroll', () => {
     updateVisibleWaveformWindowRatios(waveformScroll);
     scheduleBeatGridWindowRender();
-    if (isWaveformDragging) {
-      return;
-    }
     scheduleManageOverviewWaveformRender((wavesurfer?.getCurrentTime?.() || 0) * 1000);
   }, { passive: true });
   waveformScroll.addEventListener('mousedown', startWaveformDrag);

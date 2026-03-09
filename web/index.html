@@ -51,14 +51,29 @@
         <h2>Waveform</h2>
         <div id="waveform-container">
           <div id="waveform"></div>
-          <canvas
-            id="game-spectral-waveform"
-            class="spectral-waveform"
-            width="960"
-            height="88"
-            aria-label="Colored spectral waveform"
-          ></canvas>
-          <div id="game-timeline"></div>
+          <div class="waveform-composite">
+            <div
+              id="game-spectral-waveform-scroll"
+              class="spectral-waveform-scroll"
+              title="Drag to pan waveform window"
+            >
+              <canvas
+                id="game-spectral-waveform"
+                class="spectral-waveform"
+                width="960"
+                height="88"
+                aria-label="Zoomed colored spectral waveform"
+              ></canvas>
+              <div class="zoom-beat-grid-wrap">
+                <div
+                  id="game-zoom-beat-grid"
+                  class="zoom-beat-grid zoom-beat-grid-readonly"
+                  role="grid"
+                  aria-label="Read-only beat grid with note lanes"
+                ></div>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="controls spectral-controls">
           <label for="spectral-mode-select">
@@ -70,7 +85,7 @@
             </select>
           </label>
         </div>
-        <p class="hint">Waveform preview of the currently selected song.</p>
+        <p class="hint">Zoomed waveform window with non-editable beat grid for the selected song.</p>
       </section>
 
     <section id="visualization" class="surface surface-plain">

@@ -320,6 +320,19 @@ h2 {
   border-color: var(--accent);
 }
 
+.beat-cell-readonly {
+  cursor: default;
+  pointer-events: none;
+}
+
+.zoom-beat-grid-readonly {
+  user-select: none;
+}
+
+.zoom-beat-grid-readonly .beat-cell:hover {
+  border-color: var(--border);
+}
+
 .beat-cell[data-lane='left'].active {
   border-color: #a5b4fc;
   background: rgba(165, 180, 252, 0.25);
@@ -461,14 +474,22 @@ textarea {
   display: none;
 }
 
+.waveform-composite {
+  margin-top: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: rgba(2, 6, 23, 0.95);
+}
+
 .spectral-waveform {
   display: block;
   width: 100%;
   min-width: 100%;
   height: 88px;
-  margin: 0.5rem 0 0;
-  border: 1px solid var(--border);
-  border-radius: 0.75rem 0.75rem 0 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   box-sizing: border-box;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.95));
 }
@@ -476,7 +497,13 @@ textarea {
 .spectral-waveform-scroll {
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   cursor: grab;
+}
+
+.spectral-waveform-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .spectral-waveform-scroll.dragging {
@@ -485,13 +512,16 @@ textarea {
 }
 
 .overview-waveform-wrap {
-  margin-top: 0.25rem;
+  margin-top: 0;
+  border-top: 1px solid var(--border);
 }
 
 .spectral-waveform-overview {
   height: 72px;
   min-width: 100%;
   width: 100%;
+  margin: 0;
+  border-radius: 0;
   cursor: grab;
 }
 
@@ -501,7 +531,7 @@ textarea {
 
 .zoom-beat-grid-wrap {
   margin-top: 0;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0;
 }
 
 .zoom-beat-grid {
@@ -511,9 +541,9 @@ textarea {
   display: grid;
   grid-template-rows: auto;
   gap: 0;
-  border: 1px solid var(--border);
-  border-top: 0;
-  border-radius: 0 0 0.7rem 0.7rem;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
   box-sizing: border-box;
   background: rgba(15, 23, 42, 0.7);
   padding: 0;
