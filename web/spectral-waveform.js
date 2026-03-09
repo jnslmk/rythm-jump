@@ -236,15 +236,17 @@
       return;
     }
 
-    const progressMs = Math.max(Number(config.progressMs) || 0, 0);
-    drawHighlightAndProgress(
-      ctx,
-      width,
-      axisY,
-      durationMs,
-      progressMs,
-      config.highlightWindowRatios || null
-    );
+    if (config.showProgress !== false || config.highlightWindowRatios) {
+      const progressMs = Math.max(Number(config.progressMs) || 0, 0);
+      drawHighlightAndProgress(
+        ctx,
+        width,
+        axisY,
+        durationMs,
+        progressMs,
+        config.highlightWindowRatios || null
+      );
+    }
 
     if (config.showTimeAxis) {
       drawTimeAxis(ctx, width, height, durationMs);
@@ -266,6 +268,13 @@
       overviewBaseCacheWidth: 0,
       overviewBaseCacheHeight: 0,
       overviewBaseCacheAnalysisRef: null,
+      mainBaseCacheCanvas: null,
+      mainBaseCacheWidth: 0,
+      mainBaseCacheHeight: 0,
+      mainBaseCacheAnalysisRef: null,
+      mainBaseCacheDurationMs: 0,
+      mainBaseCacheRmsMax: 0,
+      mainBaseCacheShowTimeAxis: false,
       visibleWindowRatios: { start: 0, end: 1 },
       detachFns: []
     };
@@ -383,7 +392,31 @@
 
     function renderMain(progressMs = getProgressMs()) {
       const canvas = getElement(config.canvas);
-      renderCanvas(canvas, getRenderConfig(progressMs));
+      if (canvas && canvas.clientWidth >= 2 && canvas.clientHeight >= 2) {
+        const ctx = canvas.getContext('2d');
+        const width = Math.max(canvas.clientWidth, 1);
+        const height = Math.max(canvas.clientHeight, 1);
+        if (canvas.width !== width) {
+          canvas.width = width;
+        }
+        if (canvas.height !== height) {
+          canvas.height = height;
+        }
+
+        const baseCanvas = getMainBaseCanvas(width, height);
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(baseCanvas, 0, 0);
+        drawHighlightAndProgress(
+          ctx,
+          width,
+          config.showTimeAxis === true ? height - 16 : height - 2,
+          getDurationMs(),
+          progressMs,
+          null
+        );
+      } else {
+        renderCanvas(canvas, getRenderConfig(progressMs));
+      }
 
       const scrollContainer = getElement(config.scrollContainer);
       if (
@@ -402,6 +435,44 @@
       }
 
       scheduleOverviewRender(progressMs);
+    }
+
+    function getMainBaseCanvas(width, height) {
+      const analysisRef = getAnalysis();
+      const durationMs = getDurationMs();
+      const rmsMax = getRmsMax();
+      const showTimeAxis = config.showTimeAxis === true;
+      if (
+        controllerState.mainBaseCacheCanvas
+        && controllerState.mainBaseCacheWidth === width
+        && controllerState.mainBaseCacheHeight === height
+        && controllerState.mainBaseCacheAnalysisRef === analysisRef
+        && controllerState.mainBaseCacheDurationMs === durationMs
+        && controllerState.mainBaseCacheRmsMax === rmsMax
+        && controllerState.mainBaseCacheShowTimeAxis === showTimeAxis
+      ) {
+        return controllerState.mainBaseCacheCanvas;
+      }
+
+      controllerState.mainBaseCacheCanvas = document.createElement('canvas');
+      controllerState.mainBaseCacheCanvas.width = width;
+      controllerState.mainBaseCacheCanvas.height = height;
+      controllerState.mainBaseCacheWidth = width;
+      controllerState.mainBaseCacheHeight = height;
+      controllerState.mainBaseCacheAnalysisRef = analysisRef;
+      controllerState.mainBaseCacheDurationMs = durationMs;
+      controllerState.mainBaseCacheRmsMax = rmsMax;
+      controllerState.mainBaseCacheShowTimeAxis = showTimeAxis;
+      renderCanvas(
+        controllerState.mainBaseCacheCanvas,
+        {
+          ...getRenderConfig(0),
+          highlightWindowRatios: null,
+          progressMs: 0,
+          showProgress: false,
+        }
+      );
+      return controllerState.mainBaseCacheCanvas;
     }
 
     function getOverviewBaseCanvas(width, height) {
@@ -484,6 +555,13 @@
       controllerState.overviewBaseCacheWidth = 0;
       controllerState.overviewBaseCacheHeight = 0;
       controllerState.overviewBaseCacheAnalysisRef = null;
+      controllerState.mainBaseCacheCanvas = null;
+      controllerState.mainBaseCacheWidth = 0;
+      controllerState.mainBaseCacheHeight = 0;
+      controllerState.mainBaseCacheAnalysisRef = null;
+      controllerState.mainBaseCacheDurationMs = 0;
+      controllerState.mainBaseCacheRmsMax = 0;
+      controllerState.mainBaseCacheShowTimeAxis = false;
     }
 
     function startScrollDrag(event) {

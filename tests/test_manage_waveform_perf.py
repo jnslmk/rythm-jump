@@ -5,6 +5,9 @@ from typing import Any
 import pytest
 from playwright.sync_api import Error, sync_playwright
 
+MAIN_WAVEFORM_FIRST_RENDER_MIN_FILL_RECTS = 9_000
+MAIN_WAVEFORM_CACHED_RENDER_MAX_FILL_RECTS = 50
+
 
 def _perf_dom_html() -> str:
     return """
@@ -210,3 +213,102 @@ def test_manage_waveform_overview_draw_speed_budget() -> None:
         f"{result['perFrameMs']:.2f}ms/frame over {result['frameCount']} frames "
         f"(budget: {budget_ms:.2f}ms/frame, total: {result['elapsedMs']:.2f}ms)"
     )
+
+
+def test_main_waveform_reuses_cached_base_between_frames() -> None:
+    spectral_waveform_js_path = (
+        Path(__file__).resolve().parents[1] / "web" / "spectral-waveform.js"
+    )
+
+    with sync_playwright() as playwright:
+        browser = None
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Error as exc:  # pragma: no cover - environment dependent
+            pytest.skip(f"Playwright Chromium unavailable: {exc}")
+
+        assert browser is not None
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        page.set_content(
+            """
+<!doctype html>
+<html lang="en">
+  <body>
+    <div id="scroll" style="width: 960px; overflow-x: auto;">
+      <canvas
+        id="main"
+        width="3200"
+        height="88"
+        style="width: 3200px; height: 88px;"
+      ></canvas>
+    </div>
+    <canvas
+      id="overview"
+      width="960"
+      height="72"
+      style="width: 960px; height: 72px;"
+    ></canvas>
+  </body>
+</html>
+""",
+        )
+        page.add_script_tag(path=str(spectral_waveform_js_path))
+        counts: dict[str, Any] = page.evaluate(
+            """() => {
+          const pointCount = 120000;
+          const analysis = {
+            waveform_band_low: Array.from(
+              { length: pointCount },
+              (_, i) => Math.max(0, Math.min(1, Math.abs(Math.sin(i * 0.008))))
+            ),
+            waveform_band_mid: Array.from(
+              { length: pointCount },
+              (_, i) => Math.max(0, Math.min(1, Math.abs(Math.sin(i * 0.012 + 0.7))))
+            ),
+            waveform_band_high: Array.from(
+              { length: pointCount },
+              (_, i) => Math.max(0, Math.min(1, Math.abs(Math.sin(i * 0.021 + 1.4))))
+            ),
+            beat_times_ms: Array.from({ length: 256 }, (_, i) => i * 600),
+            beat_descriptors: []
+          };
+
+          const ctxProto = CanvasRenderingContext2D.prototype;
+          const originalFillRect = ctxProto.fillRect;
+          let fillRectCount = 0;
+          ctxProto.fillRect = function patchedFillRect(...args) {
+            fillRectCount += 1;
+            return originalFillRect.apply(this, args);
+          };
+
+          const controller = window.SpectralWaveform.createController({
+            canvas: '#main',
+            scrollContainer: '#scroll',
+            overviewCanvas: '#overview',
+            getAnalysis: () => analysis,
+            getBeatTimesMs: () => analysis.beat_times_ms,
+            getDurationMs: () => 180000,
+            getProgressMs: () => 0,
+            getRmsMax: () => 1,
+            getZoom: () => 1,
+            shouldAutoFollow: () => false,
+            showTimeAxis: false
+          });
+          controller.attach();
+
+          fillRectCount = 0;
+          controller.renderMain(1000);
+          const firstRenderFillRects = fillRectCount;
+
+          fillRectCount = 0;
+          controller.renderMain(1100);
+          const secondRenderFillRects = fillRectCount;
+
+          ctxProto.fillRect = originalFillRect;
+          return { firstRenderFillRects, secondRenderFillRects };
+        }""",
+        )
+        browser.close()
+
+    assert counts["firstRenderFillRects"] > MAIN_WAVEFORM_FIRST_RENDER_MIN_FILL_RECTS
+    assert counts["secondRenderFillRects"] < MAIN_WAVEFORM_CACHED_RENDER_MAX_FILL_RECTS

@@ -491,26 +491,31 @@ function renderGameBeatGrid() {
   const clampedStart = Math.max(0, Math.min(startIndex, state.gameBeatSlots.length - 1));
   const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
   const firstMs = state.gameBeatSlots[clampedStart]?.timeMs || 0;
-  const lastMs = state.gameBeatSlots[clampedEnd]?.timeMs || firstMs;
-  const leadUnits = Math.max(firstMs / baseGapMs, 0);
-  const tailUnits = Math.max((durationMs - lastMs) / baseGapMs, 0);
+  const contentWidthPx = Math.max(
+    document.getElementById('game-spectral-waveform')?.clientWidth || beatGrid.clientWidth || 0,
+    1
+  );
+  const pxPerMs = contentWidthPx / durationMs;
+  const leadWidthPx = Math.max(firstMs * pxPerMs, 0);
   const trackParts = [];
-  if (leadUnits > 0.0001) {
-    trackParts.push(`minmax(0, ${leadUnits}fr)`);
+  if (leadWidthPx > 0.0001) {
+    trackParts.push(`${leadWidthPx}px`);
   }
   for (let i = clampedStart; i <= clampedEnd; i += 1) {
     const currentMs = state.gameBeatSlots[i].timeMs;
-    const nextMs = state.gameBeatSlots[i + 1]?.timeMs ?? (currentMs + baseGapMs);
-    const spanUnits = Math.max((nextMs - currentMs) / Math.max(baseGapMs, 1), 0.2);
-    trackParts.push(`minmax(0, ${spanUnits}fr)`);
+    const nextMs = state.gameBeatSlots[i + 1]?.timeMs ?? durationMs;
+    const spanWidthPx = Math.max((nextMs - currentMs) * pxPerMs, 1);
+    trackParts.push(`${spanWidthPx}px`);
   }
-  if (tailUnits > 0.0001) {
-    trackParts.push(`minmax(0, ${tailUnits}fr)`);
+  const tailStartMs = state.gameBeatSlots[clampedEnd + 1]?.timeMs ?? durationMs;
+  const tailWidthPx = Math.max((durationMs - tailStartMs) * pxPerMs, 0);
+  if (tailWidthPx > 0.0001) {
+    trackParts.push(`${tailWidthPx}px`);
   }
   beatGrid.style.gridTemplateColumns = trackParts.join(' ');
 
   const fragment = document.createDocumentFragment();
-  if (leadUnits > 0.0001) {
+  if (leadWidthPx > 0.0001) {
     const leadSpacer = document.createElement('div');
     leadSpacer.className = 'beat-grid-spacer';
     leadSpacer.setAttribute('aria-hidden', 'true');
@@ -548,7 +553,7 @@ function renderGameBeatGrid() {
     fragment.appendChild(column);
   }
 
-  if (tailUnits > 0.0001) {
+  if (tailWidthPx > 0.0001) {
     const tailSpacer = document.createElement('div');
     tailSpacer.className = 'beat-grid-spacer';
     tailSpacer.setAttribute('aria-hidden', 'true');
