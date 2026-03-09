@@ -679,6 +679,23 @@ function clampLevel(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+function getMovingBarLedSpan(numLeds) {
+  const travelMs = Math.max(Number(state.chart?.travel_time_ms) || 0, 1);
+  const slotTimes = state.gameBeatSlots.map((slot) => slot.timeMs);
+  let minGapMs = Infinity;
+  for (let index = 1; index < slotTimes.length; index += 1) {
+    const gapMs = slotTimes[index] - slotTimes[index - 1];
+    if (gapMs > 0) {
+      minGapMs = Math.min(minGapMs, gapMs);
+    }
+  }
+  const halfStripLeds = Math.max(Math.floor(numLeds / 2) - 2, 2);
+  const projectedGapLeds = Number.isFinite(minGapMs)
+    ? Math.floor((minGapMs / travelMs) * halfStripLeds) - 1
+    : 6;
+  return Math.max(2, Math.min(8, projectedGapLeds));
+}
+
 function reduceStreamLevels(levels, event) {
   if (event.type === 'led_frame' && Array.isArray(event.levels)) {
     return event.levels.map(clampLevel);
@@ -711,66 +728,53 @@ function renderVisualizer() {
   canvas.height = canvas.clientHeight;
   const width = canvas.width;
   const height = canvas.height;
-  const centerX = width / 2;
 
   ctx.clearRect(0, 0, width, height);
-  
-  // Background
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, width, height);
 
-  // LED Strip Representation
   const numLeds = 70;
   const ledWidth = (width - 20) / numLeds;
   const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
 
   for (let i = 0; i < numLeds; i++) {
-    const intensity = i < numLeds / 2 ? state.levels[0] : state.levels[1];
-    const distFromCenter = Math.abs(i - (numLeds - 1) / 2) / (numLeds / 2);
-    const ledIntensity = intensity * (1 - distFromCenter * 0.5);
-    
-    ctx.fillStyle = i < numLeds / 2 
-      ? `rgba(59, 130, 246, ${ledIntensity})` 
-      : `rgba(236, 72, 153, ${ledIntensity})`;
-    
+    ctx.fillStyle = i < numLeds / 2
+      ? 'rgba(59, 130, 246, 0.12)'
+      : 'rgba(236, 72, 153, 0.12)';
     ctx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
-    
-    // Glow effect
-    if (ledIntensity > 0.1) {
-      ctx.shadowBlur = 10 * ledIntensity;
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.strokeRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
-      ctx.shadowBlur = 0;
-    }
   }
 
-  renderBars(ctx, width, height, ledY, ledHeight, centerX);
+  renderBars(ctx, width, ledY, ledHeight, numLeds, ledWidth);
   renderGameSpectralWaveform();
 }
 
-function renderBars(ctx, canvasWidth, canvasHeight, ledY, ledHeight, centerX) {
-  const halfWidth = (canvasWidth - 20) / 2;
-  const barHeight = ledHeight + 14;
-  const barY = ledY - barHeight - 6;
+function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
+  const centerLeftIndex = Math.floor((numLeds / 2) - 1);
+  const centerRightIndex = centerLeftIndex + 1;
+  const travelLeds = Math.max(centerLeftIndex - 1, 1);
+  const barSpan = getMovingBarLedSpan(numLeds);
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
     const ratio = Math.min(Math.max(bar.progress_ms / travelMs, 0), 1);
-    const length = ratio * Math.max(halfWidth - 10, 0);
-    if (length <= 0) {
-      return;
-    }
+    const headOffset = Math.round(ratio * travelLeds);
+    const headIndex = bar.lane === 'left'
+      ? centerLeftIndex - headOffset
+      : centerRightIndex + headOffset;
+    const startIndex = bar.lane === 'left'
+      ? Math.max(0, headIndex - barSpan + 1)
+      : Math.min(numLeds - 1, headIndex);
+    const endIndex = bar.lane === 'left'
+      ? Math.min(numLeds - 1, headIndex)
+      : Math.min(numLeds - 1, headIndex + barSpan - 1);
 
-    ctx.fillStyle =
-      bar.lane === 'left'
-        ? 'rgba(59, 130, 246, 0.7)'
-        : 'rgba(236, 72, 153, 0.7)';
-    ctx.fillRect(
-      bar.lane === 'left' ? centerX - length : centerX,
-      barY,
-      length,
-      barHeight
-    );
+    for (let ledIndex = startIndex; ledIndex <= endIndex; ledIndex += 1) {
+      const x = 10 + ledIndex * ledWidth;
+      ctx.fillStyle = bar.lane === 'left'
+        ? 'rgba(96, 165, 250, 0.95)'
+        : 'rgba(244, 114, 182, 0.95)';
+      ctx.fillRect(x, ledY, ledWidth - 2, ledHeight);
+    }
   });
 }
 
@@ -1163,17 +1167,6 @@ function init() {
   
   fetchSongs();
   connectWebSocket();
-  
-  // Animation loop for smooth decay if no clock ticks
-    function animate() {
-      state.levels = [
-        clampLevel(state.levels[0] * 0.95),
-        clampLevel(state.levels[1] * 0.95)
-      ];
-      renderVisualizer();
-      window.requestAnimationFrame(animate);
-    }
-  animate();
 }
 
 document.addEventListener('DOMContentLoaded', init);
