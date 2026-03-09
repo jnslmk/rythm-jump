@@ -214,6 +214,14 @@ h2 {
   min-block-size: 3.125rem;
 }
 
+.edit-song-controls {
+  align-items: flex-end;
+}
+
+.edit-song-controls .controls-menu {
+  align-self: flex-end;
+}
+
 #edit-song .controls #song-edit-select {
   flex: 1 1 280px;
 }
