@@ -1039,12 +1039,15 @@ function renderDebugPanel() {
 
 function handleBarFrame(payload) {
   const key = `${payload.lane}-${payload.hit_time_ms}`;
+  const travelMs = Math.max(Number(payload.travel_time_ms) || 0, 1);
+  const progressMs = Math.min(Math.max(Number(payload.progress_ms) || 0, 0), travelMs);
   state.activeBars[key] = {
     ...payload,
-    playback_anchor_ms: resolveCurrentPlaybackMs(payload.progress_ms),
+    progress_ms: progressMs,
+    playback_anchor_ms: Math.max((Number(payload.hit_time_ms) || 0) - travelMs + progressMs, 0),
   };
 
-  if (payload.progress_ms >= payload.travel_time_ms) {
+  if (progressMs >= travelMs) {
     window.setTimeout(() => {
       if (state.activeBars[key]?.hit_time_ms === payload.hit_time_ms) {
         delete state.activeBars[key];
