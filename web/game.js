@@ -686,25 +686,21 @@ function renderVisualizer() {
 
 function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   void canvasWidth;
-  const centerLeftIndex = Math.floor((numLeds / 2) - 1);
-  const centerRightIndex = centerLeftIndex + 1;
-  const travelLeds = Math.max(centerLeftIndex - 1, 1);
   const barSpan = getMovingBarLedSpan(numLeds);
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
     const ratio = Math.min(Math.max(bar.progress_ms / travelMs, 0), 1);
-    const headOffset = Math.round(ratio * travelLeds);
-    const headIndex = bar.lane === 'left'
-      ? centerLeftIndex - headOffset
-      : centerRightIndex + headOffset;
-    const startIndex = bar.lane === 'left'
-      ? Math.max(0, headIndex - barSpan + 1)
-      : Math.min(numLeds - 1, headIndex);
-    const endIndex = bar.lane === 'left'
-      ? Math.min(numLeds - 1, headIndex)
-      : Math.min(numLeds - 1, headIndex + barSpan - 1);
+    const ledRange = VisualizerProjection.getRenderedBarRange(
+      numLeds,
+      ratio,
+      bar.lane,
+      barSpan
+    );
+    if (!ledRange) {
+      return;
+    }
 
-    for (let ledIndex = startIndex; ledIndex <= endIndex; ledIndex += 1) {
+    for (let ledIndex = ledRange.startIndex; ledIndex <= ledRange.endIndex; ledIndex += 1) {
       const x = 10 + ledIndex * ledWidth;
       ctx.fillStyle = bar.lane === 'left'
         ? 'rgba(96, 165, 250, 0.95)'
