@@ -58,9 +58,10 @@ nav {
 .app-nav {
   width: min(960px, 100%);
   margin: 0 auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: flex;
   justify-content: center;
 }
