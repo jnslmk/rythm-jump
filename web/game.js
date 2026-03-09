@@ -609,6 +609,18 @@ function pushTimelineEntry(timeline, lane, entry) {
   }
 }
 
+function upsertTriggerTimelineEntry(lane, entry) {
+  const bucket = state.triggerTimeline[lane];
+  const existingIndex = bucket.findIndex(
+    (timelineEntry) => timelineEntry.hitTimeMs === entry.hitTimeMs
+  );
+  if (existingIndex >= 0) {
+    bucket[existingIndex] = entry;
+    return;
+  }
+  pushTimelineEntry(state.triggerTimeline, lane, entry);
+}
+
 let audioElement = null;
 
 let socket = null;
@@ -1009,7 +1021,7 @@ function handleBarFrame(payload) {
     }, 250);
   }
 
-  pushTimelineEntry(state.triggerTimeline, payload.lane, {
+  upsertTriggerTimelineEntry(payload.lane, {
     hitTimeMs: payload.hit_time_ms,
     progressMs: payload.progress_ms,
     remainingMs: payload.remaining_ms,
