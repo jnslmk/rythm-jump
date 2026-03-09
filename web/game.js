@@ -63,6 +63,7 @@ let gameWaveSurfer = null;
 let visualizerEffectRafId = 0;
 let gameWaveformController = null;
 let gameWaveformRenderRafId = 0;
+let gamePlaybackRenderRafId = 0;
 let pendingGameWaveformProgressMs = 0;
 let gameBeatGridWindowRenderRafId = 0;
 let lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
@@ -601,6 +602,34 @@ function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs
   });
 }
 
+function shouldAnimateGamePlayback() {
+  const audio = ensureAudioElement();
+  return isSessionPlaying() || Boolean(audio && !audio.paused && !audio.ended);
+}
+
+function ensureGamePlaybackRenderLoop() {
+  if (gamePlaybackRenderRafId || !shouldAnimateGamePlayback()) {
+    return;
+  }
+  const renderFrame = () => {
+    gamePlaybackRenderRafId = 0;
+    renderGameMeta();
+    renderGameSpectralWaveform(resolveCurrentPlaybackMs());
+    if (shouldAnimateGamePlayback()) {
+      gamePlaybackRenderRafId = window.requestAnimationFrame(renderFrame);
+    }
+  };
+  gamePlaybackRenderRafId = window.requestAnimationFrame(renderFrame);
+}
+
+function stopGamePlaybackRenderLoop() {
+  if (!gamePlaybackRenderRafId) {
+    return;
+  }
+  window.cancelAnimationFrame(gamePlaybackRenderRafId);
+  gamePlaybackRenderRafId = 0;
+}
+
 function pushTimelineEntry(timeline, lane, entry) {
   const bucket = timeline[lane];
   bucket.unshift(entry);
@@ -1065,6 +1094,7 @@ function resetSessionState() {
     window.cancelAnimationFrame(visualizerEffectRafId);
     visualizerEffectRafId = 0;
   }
+  stopGamePlaybackRenderLoop();
   if (gameWaveformRenderRafId) {
     window.cancelAnimationFrame(gameWaveformRenderRafId);
     gameWaveformRenderRafId = 0;
@@ -1099,6 +1129,11 @@ function connectWebSocket() {
         state.runStatus = payload.state;
         if (typeof payload.progress_ms === 'number') {
           state.sessionProgressMs = payload.progress_ms;
+        }
+        if (isSessionPlaying()) {
+          ensureGamePlaybackRenderLoop();
+        } else {
+          stopGamePlaybackRenderLoop();
         }
         updateUI();
         scheduleGameSpectralWaveformRender();
@@ -1321,6 +1356,11 @@ function init() {
     audio.addEventListener(eventName, () => {
       renderGameMeta();
       scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
+      if (shouldAnimateGamePlayback()) {
+        ensureGamePlaybackRenderLoop();
+      } else {
+        stopGamePlaybackRenderLoop();
+      }
     });
   });
 
