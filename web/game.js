@@ -4,6 +4,7 @@ const CLOCK_DECAY = 0.85;
 const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
+const HIT_EFFECT_DURATION_MS = 320;
 const MIN_SPECTRAL_RMS = 0.001;
 const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
@@ -44,6 +45,7 @@ let state = {
   levels: [0, 0],
   songs: [],
   activeBars: {},
+  hitEffects: { left: [], right: [] },
   triggerTimeline: { left: [], right: [] },
   pressTimeline: { left: [], right: [] },
   remainingMs: 0,
@@ -65,6 +67,7 @@ let gameWaveformDragStartX = 0;
 let gameWaveformDragStartLeft = 0;
 let gameWaveformDragTargetLeft = 0;
 let gameWaveformDragRafId = 0;
+let visualizerEffectRafId = 0;
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
@@ -679,6 +682,84 @@ function clampLevel(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+function getCurrentPlaybackProgressMs() {
+  const audio = ensureAudioElement();
+  if (Number.isFinite(audio.currentTime) && audio.currentTime > 0) {
+    return Math.round(audio.currentTime * 1000);
+  }
+  return Math.max(state.sessionProgressMs || 0, 0);
+}
+
+function getLaneHitNotes(lane) {
+  return Array.isArray(state.chart?.[lane]) ? state.chart[lane] : [];
+}
+
+function judgePressTiming(lane) {
+  const notes = getLaneHitNotes(lane);
+  const windows = state.chart?.judgement_windows_ms || { perfect: 0, good: 0 };
+  const pressMs = getCurrentPlaybackProgressMs();
+  let closestDeltaMs = null;
+
+  for (const noteTimeMs of notes) {
+    const deltaMs = pressMs - Number(noteTimeMs || 0);
+    if (closestDeltaMs === null || Math.abs(deltaMs) < Math.abs(closestDeltaMs)) {
+      closestDeltaMs = deltaMs;
+    }
+  }
+
+  if (closestDeltaMs === null) {
+    return {
+      deltaMs: null,
+      judgement: 'off',
+      pressMs,
+      triggerHit: false
+    };
+  }
+
+  const absoluteDeltaMs = Math.abs(closestDeltaMs);
+  if (absoluteDeltaMs <= windows.perfect) {
+    return { deltaMs: closestDeltaMs, judgement: 'perfect', pressMs, triggerHit: true };
+  }
+  if (absoluteDeltaMs <= windows.good) {
+    return { deltaMs: closestDeltaMs, judgement: 'good', pressMs, triggerHit: true };
+  }
+  return { deltaMs: closestDeltaMs, judgement: 'off', pressMs, triggerHit: false };
+}
+
+function pruneHitEffects(now = performance.now()) {
+  for (const lane of ['left', 'right']) {
+    state.hitEffects[lane] = state.hitEffects[lane].filter(
+      (effect) => (now - effect.createdAt) < HIT_EFFECT_DURATION_MS
+    );
+  }
+}
+
+function hasActiveHitEffects() {
+  return state.hitEffects.left.length > 0 || state.hitEffects.right.length > 0;
+}
+
+function scheduleVisualizerEffectRender() {
+  if (visualizerEffectRafId) {
+    return;
+  }
+  visualizerEffectRafId = window.requestAnimationFrame(() => {
+    visualizerEffectRafId = 0;
+    renderVisualizer();
+    if (hasActiveHitEffects()) {
+      scheduleVisualizerEffectRender();
+    }
+  });
+}
+
+function addHitEffect(lane, judgement) {
+  state.hitEffects[lane].push({
+    createdAt: performance.now(),
+    judgement
+  });
+  renderVisualizer();
+  scheduleVisualizerEffectRender();
+}
+
 function getMovingBarLedSpan(numLeds) {
   const travelMs = Math.max(Number(state.chart?.travel_time_ms) || 0, 1);
   const slotTimes = state.gameBeatSlots.map((slot) => slot.timeMs);
@@ -737,6 +818,7 @@ function renderVisualizer() {
   const ledWidth = (width - 20) / numLeds;
   const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
+  pruneHitEffects();
 
   for (let i = 0; i < numLeds; i++) {
     ctx.fillStyle = i < numLeds / 2
@@ -746,10 +828,12 @@ function renderVisualizer() {
   }
 
   renderBars(ctx, width, ledY, ledHeight, numLeds, ledWidth);
+  renderHitEffects(ctx, ledY, ledHeight, numLeds, ledWidth);
   renderGameSpectralWaveform();
 }
 
 function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
+  void canvasWidth;
   const centerLeftIndex = Math.floor((numLeds / 2) - 1);
   const centerRightIndex = centerLeftIndex + 1;
   const travelLeds = Math.max(centerLeftIndex - 1, 1);
@@ -776,6 +860,45 @@ function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
       ctx.fillRect(x, ledY, ledWidth - 2, ledHeight);
     }
   });
+}
+
+function getJudgementEffectColor(judgement, alpha) {
+  if (judgement === 'perfect') {
+    return `rgba(250, 204, 21, ${alpha})`;
+  }
+  if (judgement === 'good') {
+    return `rgba(74, 222, 128, ${alpha})`;
+  }
+  return `rgba(248, 113, 113, ${alpha})`;
+}
+
+function renderHitEffects(ctx, ledY, ledHeight, numLeds, ledWidth) {
+  const centerLeftIndex = Math.floor((numLeds / 2) - 1);
+  const centerRightIndex = centerLeftIndex + 1;
+  const baseSpan = 4;
+  const now = performance.now();
+
+  for (const lane of ['left', 'right']) {
+    state.hitEffects[lane].forEach((effect) => {
+      const ageMs = now - effect.createdAt;
+      const ageRatio = Math.max(0, Math.min(ageMs / HIT_EFFECT_DURATION_MS, 1));
+      const spread = Math.round(ageRatio * 3);
+      const alpha = 1 - ageRatio;
+      const anchorIndex = lane === 'left' ? centerLeftIndex - 1 : centerRightIndex + 1;
+      const startIndex = lane === 'left'
+        ? Math.max(0, anchorIndex - baseSpan - spread + 1)
+        : Math.max(0, anchorIndex - spread);
+      const endIndex = lane === 'left'
+        ? Math.min(numLeds - 1, anchorIndex + spread)
+        : Math.min(numLeds - 1, anchorIndex + baseSpan + spread - 1);
+
+      for (let ledIndex = startIndex; ledIndex <= endIndex; ledIndex += 1) {
+        const x = 10 + ledIndex * ledWidth;
+        ctx.fillStyle = getJudgementEffectColor(effect.judgement, alpha);
+        ctx.fillRect(x, ledY, ledWidth - 2, ledHeight);
+      }
+    });
+  }
 }
 
 function renderTimelineList(containerId, entries, formatter) {
@@ -880,18 +1003,24 @@ function handleBarFrame(payload) {
 }
 
 function recordButtonPress(lane) {
-  const offset = state.sessionStartMs ? Date.now() - state.sessionStartMs : null;
+  const judgementResult = judgePressTiming(lane);
   const entry = {
-    label: offset !== null ? formatMs(offset) : new Date().toLocaleTimeString(),
+    label: formatMs(judgementResult.pressMs),
     source: 'keyboard',
+    deltaMs: judgementResult.deltaMs,
+    judgement: judgementResult.judgement,
+    triggerHit: judgementResult.triggerHit,
   };
   pushTimelineEntry(state.pressTimeline, lane, entry);
+  addHitEffect(lane, judgementResult.judgement);
   renderDebugPanel();
 }
 
 function resetSessionState() {
   stopAudioPlayback();
   state.activeBars = {};
+  state.hitEffects.left = [];
+  state.hitEffects.right = [];
   state.triggerTimeline.left = [];
   state.triggerTimeline.right = [];
   state.pressTimeline.left = [];
@@ -899,6 +1028,10 @@ function resetSessionState() {
   state.remainingMs = 0;
   state.sessionProgressMs = 0;
   state.sessionStartMs = null;
+  if (visualizerEffectRafId) {
+    window.cancelAnimationFrame(visualizerEffectRafId);
+    visualizerEffectRafId = 0;
+  }
   renderVisualizer();
   renderGameSpectralWaveform(0);
   renderDebugPanel();
