@@ -845,11 +845,9 @@ function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
   const barSpan = getMovingBarLedSpan(numLeds);
   Object.values(state.activeBars).forEach((bar) => {
     const travelMs = bar.travel_time_ms || 1;
-    const progressMs = VisualizerProjection.getPlaybackAlignedBarProgressMs(
-      bar.hit_time_ms,
-      travelMs,
-      resolveCurrentPlaybackMs(),
-      bar.progress_ms
+    const progressMs = Math.min(
+      Math.max(Number(bar.progress_ms) || 0, 0),
+      travelMs
     );
     const ratio = Math.min(Math.max(progressMs / travelMs, 0), 1);
     const ledRange = VisualizerProjection.getRenderedBarRange(
