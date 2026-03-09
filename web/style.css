@@ -486,6 +486,18 @@ textarea.input-control {
   transform: none;
 }
 
+#btn-start {
+  min-inline-size: 12rem;
+}
+
+#btn-play-pause {
+  min-inline-size: 7rem;
+}
+
+#btn-toggle-debug {
+  min-inline-size: 12rem;
+}
+
 canvas {
   display: block;
   margin: 1rem auto;
