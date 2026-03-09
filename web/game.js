@@ -9,6 +9,7 @@ const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
 const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
 const GAME_NOTE_SNAP_MAX_MS = 180;
+const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
 
 const KEY_MAPPING = {
   a: 'left',
@@ -53,12 +54,21 @@ let state = {
   waveformZoom: loadStoredGameWaveformZoom(),
   visibleWaveformWindowRatios: { start: 0, end: 1 },
   gameBeatSlots: [],
+  gameBeatSlotTimesMs: [],
+  gameBeatSlotBaseGapMs: 1,
   gameNoteSlotSets: { left: new Set(), right: new Set() },
 };
 
 let gameWaveSurfer = null;
 let visualizerEffectRafId = 0;
 let gameWaveformController = null;
+let gameWaveformRenderRafId = 0;
+let pendingGameWaveformProgressMs = 0;
+let gameBeatGridWindowRenderRafId = 0;
+let lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
+let visualizerBackgroundCanvas = null;
+let visualizerBackgroundCacheWidth = 0;
+let visualizerBackgroundCacheHeight = 0;
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
@@ -141,11 +151,11 @@ function initGameWaveform() {
   gameWaveSurfer = WaveSurfer.create(config);
   gameWaveSurfer.on('ready', () => {
     applyGameWaveformZoom({ preferExisting: true });
-    renderGameSpectralWaveform();
+    scheduleGameSpectralWaveformRender();
     renderDebugPanel();
   });
   gameWaveSurfer.on('audioprocess', () => {
-    renderGameSpectralWaveform();
+    scheduleGameSpectralWaveformRender();
   });
 }
 
@@ -155,7 +165,7 @@ function loadGameWaveform(songId) {
   if (!gameWaveSurfer) return;
   const url = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
   gameWaveSurfer.load(url);
-  renderGameSpectralWaveform(0);
+  scheduleGameSpectralWaveformRender(0);
 }
 
 function formatMs(value) {
@@ -255,8 +265,12 @@ function ensureGameWaveformController() {
     getProgressMs: () => state.sessionProgressMs,
     getRmsMax: () => state.spectralRmsMax,
     getZoom: () => state.waveformZoom || 1,
+    onScroll: () => {
+      scheduleGameBeatGridWindowRender();
+    },
     onVisibleWindowChange: (ratios) => {
       state.visibleWaveformWindowRatios = ratios;
+      scheduleGameBeatGridWindowRender();
     },
     shouldAutoFollow: () => isSessionPlaying(),
     showTimeAxis: false
@@ -303,7 +317,8 @@ function applyGameWaveformZoom(options = {}) {
     beatGrid.style.width = widthPercent;
   }
   updateVisibleWaveformWindowRatios(scrollContainer);
-  renderGameSpectralWaveform();
+  scheduleGameBeatGridWindowRender();
+  scheduleGameSpectralWaveformRender();
 }
 
 function getSortedBeatTimesMs() {
@@ -343,27 +358,60 @@ function buildGameBeatSlots() {
     }
   }
   slots.sort((a, b) => a.timeMs - b.timeMs);
+  const slotTimes = slots.map((slot) => slot.timeMs);
+  const slotGaps = [];
+  for (let i = 1; i < slotTimes.length; i += 1) {
+    const gapMs = slotTimes[i] - slotTimes[i - 1];
+    if (gapMs > 0) {
+      slotGaps.push(gapMs);
+    }
+  }
+  const baseGapMs = slotGaps.length > 0
+    ? slotGaps.sort((a, b) => a - b)[Math.floor(slotGaps.length / 2)]
+    : Math.max(resolveWaveformDurationMs() / Math.max(slots.length, 1), 1);
   state.gameBeatSlots = slots;
+  state.gameBeatSlotTimesMs = slotTimes;
+  state.gameBeatSlotBaseGapMs = Math.max(baseGapMs, 1);
   state.gameNoteSlotSets = {
     left: mapNotesToBeatSlotIndexes(state.chart?.left || []),
     right: mapNotesToBeatSlotIndexes(state.chart?.right || [])
   };
+  lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
 }
 
 function lowerBoundGameBeatSlotIndex(targetMs) {
-  if (!state.gameBeatSlots.length) {
-    return -1;
+  if (!state.gameBeatSlotTimesMs.length) {
+    return 0;
   }
   let low = 0;
-  let high = state.gameBeatSlots.length - 1;
-  let answer = state.gameBeatSlots.length - 1;
+  let high = state.gameBeatSlotTimesMs.length - 1;
+  let answer = state.gameBeatSlotTimesMs.length - 1;
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
-    if ((state.gameBeatSlots[mid]?.timeMs || 0) >= targetMs) {
+    if ((state.gameBeatSlotTimesMs[mid] || 0) >= targetMs) {
       answer = mid;
       high = mid - 1;
     } else {
       low = mid + 1;
+    }
+  }
+  return answer;
+}
+
+function upperBoundGameBeatSlotIndex(targetMs) {
+  if (!state.gameBeatSlotTimesMs.length) {
+    return 0;
+  }
+  let low = 0;
+  let high = state.gameBeatSlotTimesMs.length - 1;
+  let answer = 0;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((state.gameBeatSlotTimesMs[mid] || 0) <= targetMs) {
+      answer = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
     }
   }
   return answer;
@@ -427,30 +475,29 @@ function renderGameBeatGrid() {
   beatGrid.style.gridTemplateColumns = '1fr';
   if (!state.gameBeatSlots.length) {
     beatGrid.innerHTML = '<p class="beat-grid-empty">Beat grid will appear after a song loads.</p>';
+    lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
     return;
   }
 
   const durationMs = Math.max(resolveWaveformDurationMs(), 1);
-  const slotTimes = state.gameBeatSlots.map((slot) => slot.timeMs);
-  const slotGaps = [];
-  for (let i = 1; i < slotTimes.length; i += 1) {
-    const gap = slotTimes[i] - slotTimes[i - 1];
-    if (gap > 0) {
-      slotGaps.push(gap);
-    }
-  }
-  const baseGapMs = slotGaps.length > 0
-    ? slotGaps.sort((a, b) => a - b)[Math.floor(slotGaps.length / 2)]
-    : Math.max(durationMs / Math.max(state.gameBeatSlots.length, 1), 1);
-  const firstMs = state.gameBeatSlots[0]?.timeMs || 0;
-  const lastMs = state.gameBeatSlots[state.gameBeatSlots.length - 1]?.timeMs || firstMs;
-  const leadUnits = Math.max(firstMs / Math.max(baseGapMs, 1), 0);
-  const tailUnits = Math.max((durationMs - lastMs) / Math.max(baseGapMs, 1), 0);
+  const visibleWindow = state.visibleWaveformWindowRatios;
+  const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+  const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+  const baseGapMs = Math.max(state.gameBeatSlotBaseGapMs || 1, 1);
+  const overscanMs = baseGapMs * GAME_BEAT_GRID_OVERSCAN_SLOTS;
+  const startIndex = lowerBoundGameBeatSlotIndex(Math.max(0, visibleStartMs - overscanMs));
+  const endIndex = upperBoundGameBeatSlotIndex(Math.min(durationMs, visibleEndMs + overscanMs));
+  const clampedStart = Math.max(0, Math.min(startIndex, state.gameBeatSlots.length - 1));
+  const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
+  const firstMs = state.gameBeatSlots[clampedStart]?.timeMs || 0;
+  const lastMs = state.gameBeatSlots[clampedEnd]?.timeMs || firstMs;
+  const leadUnits = Math.max(firstMs / baseGapMs, 0);
+  const tailUnits = Math.max((durationMs - lastMs) / baseGapMs, 0);
   const trackParts = [];
   if (leadUnits > 0.0001) {
     trackParts.push(`minmax(0, ${leadUnits}fr)`);
   }
-  for (let i = 0; i < state.gameBeatSlots.length; i += 1) {
+  for (let i = clampedStart; i <= clampedEnd; i += 1) {
     const currentMs = state.gameBeatSlots[i].timeMs;
     const nextMs = state.gameBeatSlots[i + 1]?.timeMs ?? (currentMs + baseGapMs);
     const spanUnits = Math.max((nextMs - currentMs) / Math.max(baseGapMs, 1), 0.2);
@@ -469,7 +516,7 @@ function renderGameBeatGrid() {
     fragment.appendChild(leadSpacer);
   }
 
-  for (let index = 0; index < state.gameBeatSlots.length; index += 1) {
+  for (let index = clampedStart; index <= clampedEnd; index += 1) {
     const slot = state.gameBeatSlots[index];
     const column = document.createElement('div');
     column.className = slot.isBeatStart ? 'beat-column beat-start' : 'beat-column';
@@ -507,10 +554,51 @@ function renderGameBeatGrid() {
     fragment.appendChild(tailSpacer);
   }
   beatGrid.appendChild(fragment);
+  lastRenderedGameBeatGridRange = { startIndex: clampedStart, endIndex: clampedEnd };
+}
+
+function scheduleGameBeatGridWindowRender() {
+  if (!state.gameBeatSlots.length) {
+    return;
+  }
+  if (gameBeatGridWindowRenderRafId) {
+    return;
+  }
+  gameBeatGridWindowRenderRafId = window.requestAnimationFrame(() => {
+    gameBeatGridWindowRenderRafId = 0;
+    const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+    const visibleWindow = state.visibleWaveformWindowRatios;
+    const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+    const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+    const baseGapMs = Math.max(state.gameBeatSlotBaseGapMs || 1, 1);
+    const overscanMs = baseGapMs * GAME_BEAT_GRID_OVERSCAN_SLOTS;
+    const startIndex = lowerBoundGameBeatSlotIndex(Math.max(0, visibleStartMs - overscanMs));
+    const endIndex = upperBoundGameBeatSlotIndex(Math.min(durationMs, visibleEndMs + overscanMs));
+    const clampedStart = Math.max(0, Math.min(startIndex, state.gameBeatSlots.length - 1));
+    const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
+    if (
+      lastRenderedGameBeatGridRange.startIndex === clampedStart
+      && lastRenderedGameBeatGridRange.endIndex === clampedEnd
+    ) {
+      return;
+    }
+    renderGameBeatGrid();
+  });
 }
 
 function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
   ensureGameWaveformController()?.renderMain(progressMs);
+}
+
+function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs) {
+  pendingGameWaveformProgressMs = progressMs;
+  if (gameWaveformRenderRafId) {
+    return;
+  }
+  gameWaveformRenderRafId = window.requestAnimationFrame(() => {
+    gameWaveformRenderRafId = 0;
+    renderGameSpectralWaveform(pendingGameWaveformProgressMs);
+  });
 }
 
 function pushTimelineEntry(timeline, lane, entry) {
@@ -671,17 +759,40 @@ function renderVisualizer() {
   const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
   pruneHitEffects();
-
-  for (let i = 0; i < numLeds; i++) {
-    ctx.fillStyle = i < numLeds / 2
-      ? 'rgba(59, 130, 246, 0.12)'
-      : 'rgba(236, 72, 153, 0.12)';
-    ctx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
-  }
+  ctx.drawImage(getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight), 0, 0);
 
   renderBars(ctx, width, ledY, ledHeight, numLeds, ledWidth);
   renderHitEffects(ctx, ledY, ledHeight, numLeds, ledWidth);
-  renderGameSpectralWaveform();
+}
+
+function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight) {
+  if (
+    visualizerBackgroundCanvas
+    && visualizerBackgroundCacheWidth === width
+    && visualizerBackgroundCacheHeight === height
+  ) {
+    return visualizerBackgroundCanvas;
+  }
+
+  visualizerBackgroundCanvas = document.createElement('canvas');
+  visualizerBackgroundCanvas.width = width;
+  visualizerBackgroundCanvas.height = height;
+  visualizerBackgroundCacheWidth = width;
+  visualizerBackgroundCacheHeight = height;
+
+  const backgroundCtx = visualizerBackgroundCanvas.getContext('2d');
+  backgroundCtx.clearRect(0, 0, width, height);
+  backgroundCtx.fillStyle = '#0f172a';
+  backgroundCtx.fillRect(0, 0, width, height);
+
+  for (let i = 0; i < numLeds; i += 1) {
+    backgroundCtx.fillStyle = i < numLeds / 2
+      ? 'rgba(59, 130, 246, 0.12)'
+      : 'rgba(236, 72, 153, 0.12)';
+    backgroundCtx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
+  }
+
+  return visualizerBackgroundCanvas;
 }
 
 function renderBars(ctx, canvasWidth, ledY, ledHeight, numLeds, ledWidth) {
@@ -930,6 +1041,10 @@ function resetSessionState() {
     window.cancelAnimationFrame(visualizerEffectRafId);
     visualizerEffectRafId = 0;
   }
+  if (gameWaveformRenderRafId) {
+    window.cancelAnimationFrame(gameWaveformRenderRafId);
+    gameWaveformRenderRafId = 0;
+  }
   renderVisualizer();
   renderGameSpectralWaveform(0);
   renderDebugPanel();
@@ -962,7 +1077,7 @@ function connectWebSocket() {
           state.sessionProgressMs = payload.progress_ms;
         }
         updateUI();
-        renderGameSpectralWaveform();
+        scheduleGameSpectralWaveformRender();
         renderDebugPanel();
         return;
       }
@@ -978,7 +1093,7 @@ function connectWebSocket() {
             );
           }
         }
-        renderGameSpectralWaveform();
+        scheduleGameSpectralWaveformRender(state.sessionProgressMs);
         renderVisualizer();
         renderDebugPanel();
         return;
@@ -1053,7 +1168,7 @@ async function loadChart(songId) {
     renderGameBeatGrid();
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
-    renderGameSpectralWaveform(0);
+    scheduleGameSpectralWaveformRender(0);
     renderDebugPanel();
   } catch (error) {
     console.error('Failed to load chart:', error);
@@ -1181,7 +1296,7 @@ function init() {
   ['loadedmetadata', 'timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
       renderGameMeta();
-      renderGameSpectralWaveform(resolveCurrentPlaybackMs());
+      scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
     });
   });
 
@@ -1196,7 +1311,7 @@ function init() {
   window.addEventListener('resize', () => {
     applyGameWaveformZoom();
     renderGameBeatGrid();
-    renderGameSpectralWaveform();
+    scheduleGameSpectralWaveformRender();
   });
   
   fetchSongs();
