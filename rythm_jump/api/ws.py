@@ -18,8 +18,27 @@ from rythm_jump.models.chart import Chart
 
 router = APIRouter()
 
-TICK_INTERVAL_S = 0.1
+TICK_INTERVAL_S = 1 / 60
 DECAY_FACTOR = 0.85
+_DECAY_REFERENCE_MS = 100.0
+
+
+def _progress_ms_for_elapsed_s(
+    started_at_s: float,
+    now_s: float,
+    paused_duration_s: float,
+    duration_ms: int,
+) -> int:
+    """Convert monotonic elapsed time into clamped playback progress."""
+    effective_elapsed_s = max(now_s - started_at_s - paused_duration_s, 0.0)
+    return min(round(effective_elapsed_s * 1000), duration_ms)
+
+
+def _decay_multiplier_for_delta_ms(delta_ms: int) -> float:
+    """Scale the legacy 100 ms decay factor to arbitrary update intervals."""
+    if delta_ms <= 0:
+        return 1.0
+    return DECAY_FACTOR ** (delta_ms / _DECAY_REFERENCE_MS)
 
 
 class _ActiveBar(TypedDict):
@@ -75,23 +94,27 @@ class _PlaybackController:
         )
         self._task = asyncio.create_task(self._run_playback(chart, duration_ms))
 
-    async def _run_playback(self, chart: Chart, duration_ms: int) -> None:
+    async def _run_playback(self, chart: Chart, duration_ms: int) -> None:  # noqa: C901, PLR0915
         left_idx = 0
         right_idx = 0
         left_level = 0.0
         right_level = 0.0
-        progress_ms = 0
         travel_time_ms = chart.travel_time_ms
         duration = duration_ms
-        tick_ms = int(TICK_INTERVAL_S * 1000)
         left_spawn_idx = 0
         right_spawn_idx = 0
         active_bars: list[_ActiveBar] = []
+        loop = asyncio.get_running_loop()
+        started_at_s = loop.time()
+        paused_started_at_s: float | None = None
+        paused_duration_s = 0.0
+        previous_progress_ms = -1
 
         def spawn_ready_bars(
             hit_times: list[int],
             lane: str,
             current_index: int,
+            progress_ms: int,
         ) -> int:
             while current_index < len(hit_times):
                 hit_time_ms = hit_times[current_index]
@@ -110,20 +133,44 @@ class _PlaybackController:
             return current_index
 
         try:
-            while progress_ms <= duration and self._session.state != State.IDLE:
+            while self._session.state != State.IDLE:
                 if self._session.state == State.PAUSED:
+                    if paused_started_at_s is None:
+                        paused_started_at_s = loop.time()
                     await asyncio.sleep(TICK_INTERVAL_S)
                     continue
+
+                now_s = loop.time()
+                if paused_started_at_s is not None:
+                    paused_duration_s += now_s - paused_started_at_s
+                    paused_started_at_s = None
+
+                progress_ms = _progress_ms_for_elapsed_s(
+                    started_at_s=started_at_s,
+                    now_s=now_s,
+                    paused_duration_s=paused_duration_s,
+                    duration_ms=duration,
+                )
+                if progress_ms == previous_progress_ms:
+                    await asyncio.sleep(TICK_INTERVAL_S)
+                    continue
+
+                progress_delta_ms = max(progress_ms - previous_progress_ms, 0)
+                decay_multiplier = _decay_multiplier_for_delta_ms(progress_delta_ms)
+                left_level = max(left_level * decay_multiplier, 0.0)
+                right_level = max(right_level * decay_multiplier, 0.0)
 
                 left_spawn_idx = spawn_ready_bars(
                     chart.left,
                     "left",
                     left_spawn_idx,
+                    progress_ms,
                 )
                 right_spawn_idx = spawn_ready_bars(
                     chart.right,
                     "right",
                     right_spawn_idx,
+                    progress_ms,
                 )
 
                 left_idx, left_level = await self._emit_lane_events(
@@ -150,11 +197,11 @@ class _PlaybackController:
 
                 await self._send_led_frame(progress_ms, left_level, right_level)
 
-                await asyncio.sleep(TICK_INTERVAL_S)
-                progress_ms += tick_ms
                 self._progress_ms = progress_ms
-                left_level = max(left_level * DECAY_FACTOR, 0.0)
-                right_level = max(right_level * DECAY_FACTOR, 0.0)
+                previous_progress_ms = progress_ms
+                if progress_ms >= duration:
+                    break
+                await asyncio.sleep(TICK_INTERVAL_S)
         finally:
             if self._session.state != State.PAUSED:
                 self._session.state = State.IDLE
@@ -304,7 +351,7 @@ def _audio_duration_ms(audio_path: Path) -> int:
             warnings.simplefilter("ignore", FutureWarning)
             warnings.simplefilter("ignore", DeprecationWarning)
             duration_s = float(librosa.get_duration(path=str(audio_path)))
-    except (ImportError, OSError, TypeError, ValueError):  # pragma: no cover
+    except (EOFError, ImportError, OSError, TypeError, ValueError):  # pragma: no cover
         return 0
 
     return max(round(duration_s * 1000), 0)
