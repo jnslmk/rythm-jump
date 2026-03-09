@@ -38,9 +38,9 @@
     const clippedProgress = Math.min(Math.max(progress, 0), 1);
 
     if (side === 'left') {
-      return Math.round((half - 1) * clippedProgress);
+      return Math.round((half - 1) * (1 - clippedProgress));
     }
-    return (stripLen - 1) - Math.round((half - 1) * clippedProgress);
+    return half + Math.round((half - 1) * clippedProgress);
   }
 
   function getRenderedBarRange(stripLen, progress, side, span) {
