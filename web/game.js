@@ -259,7 +259,7 @@ function ensureGameWaveformController() {
       state.visibleWaveformWindowRatios = ratios;
     },
     shouldAutoFollow: () => isSessionPlaying(),
-    showTimeAxis: true
+    showTimeAxis: false
   });
   gameWaveformController.attach();
   return gameWaveformController;
