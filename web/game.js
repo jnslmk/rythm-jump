@@ -67,12 +67,16 @@ let gameWaveSurfer = null;
 let gameWaveformController = null;
 let gameWaveformRenderRafId = 0;
 let gamePlaybackRenderRafId = 0;
+let gameUiRenderRafId = 0;
 let pendingGameWaveformProgressMs = 0;
+let pendingGameUiProgressMs = 0;
 let gameBeatGridWindowRenderRafId = 0;
 let lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
 let visualizerBackgroundCanvas = null;
 let visualizerBackgroundCacheWidth = 0;
 let visualizerBackgroundCacheHeight = 0;
+let ledBeatFeedbackSignature = '';
+let ledBeatFeedbackMarkerRefs = { left: [], right: [] };
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
@@ -607,12 +611,38 @@ function refreshGameTimingLayout() {
 
 function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs) {
   pendingGameWaveformProgressMs = progressMs;
+  if (shouldAnimateGamePlayback()) {
+    ensureGamePlaybackRenderLoop();
+    return;
+  }
   if (gameWaveformRenderRafId) {
     return;
   }
   gameWaveformRenderRafId = window.requestAnimationFrame(() => {
     gameWaveformRenderRafId = 0;
     renderGameSpectralWaveform(pendingGameWaveformProgressMs);
+  });
+}
+
+function renderGameUi(progressMs = state.sessionProgressMs) {
+  const playbackMs = resolveCurrentPlaybackMs(progressMs);
+  renderGameMeta(playbackMs);
+  renderVisualizer(playbackMs);
+  renderDebugPanel(playbackMs);
+}
+
+function scheduleGameUiRender(progressMs = state.sessionProgressMs) {
+  pendingGameUiProgressMs = progressMs;
+  if (shouldAnimateGamePlayback()) {
+    ensureGamePlaybackRenderLoop();
+    return;
+  }
+  if (gameUiRenderRafId) {
+    return;
+  }
+  gameUiRenderRafId = window.requestAnimationFrame(() => {
+    gameUiRenderRafId = 0;
+    renderGameUi(pendingGameUiProgressMs);
   });
 }
 
@@ -627,8 +657,9 @@ function ensureGamePlaybackRenderLoop() {
   }
   const renderFrame = () => {
     gamePlaybackRenderRafId = 0;
-    renderGameMeta();
-    renderGameSpectralWaveform(resolveCurrentPlaybackMs());
+    const playbackMs = resolveCurrentPlaybackMs();
+    renderGameUi(playbackMs);
+    renderGameSpectralWaveform(playbackMs);
     if (shouldAnimateGamePlayback()) {
       gamePlaybackRenderRafId = window.requestAnimationFrame(renderFrame);
     }
@@ -642,6 +673,11 @@ function stopGamePlaybackRenderLoop() {
   }
   window.cancelAnimationFrame(gamePlaybackRenderRafId);
   gamePlaybackRenderRafId = 0;
+}
+
+function invalidateLedBeatFeedbackCache() {
+  ledBeatFeedbackSignature = '';
+  ledBeatFeedbackMarkerRefs = { left: [], right: [] };
 }
 
 function pushTimelineEntry(timeline, lane, entry) {
@@ -772,7 +808,59 @@ function getLaneNoteResult(lane, noteTimeMs, playbackMs) {
   return 'pending';
 }
 
-function renderLedBeatFeedback() {
+function ensureLedBeatFeedbackMarkers(container, rows, durationMs) {
+  const signature = JSON.stringify({
+    durationMs: Math.round(durationMs),
+    rows: rows.map(({ lane, notes }) => ({
+      lane,
+      notes: notes.map((noteTimeMs) => Math.round(Number(noteTimeMs) || 0)),
+    })),
+  });
+  if (ledBeatFeedbackSignature === signature) {
+    return;
+  }
+
+  container.innerHTML = '';
+  ledBeatFeedbackMarkerRefs = { left: [], right: [] };
+  const fragment = document.createDocumentFragment();
+
+  for (const { lane, label, notes } of rows) {
+    const row = document.createElement('div');
+    row.className = 'led-beat-feedback-row';
+    row.dataset.lane = lane;
+
+    const rowLabel = document.createElement('span');
+    rowLabel.className = 'led-beat-feedback-label';
+    rowLabel.textContent = label;
+    row.appendChild(rowLabel);
+
+    const track = document.createElement('div');
+    track.className = 'led-beat-feedback-track';
+    row.appendChild(track);
+
+    for (const noteTimeMs of notes) {
+      const marker = document.createElement('span');
+      const leftPercent = Math.max(
+        0,
+        Math.min(((Number(noteTimeMs) || 0) / durationMs) * 100, 100)
+      );
+      marker.className = 'led-beat-feedback-marker pending';
+      marker.style.left = `${leftPercent.toFixed(3)}%`;
+      track.appendChild(marker);
+      ledBeatFeedbackMarkerRefs[lane].push({
+        element: marker,
+        noteTimeMs: Number(noteTimeMs) || 0,
+      });
+    }
+
+    fragment.appendChild(row);
+  }
+
+  container.appendChild(fragment);
+  ledBeatFeedbackSignature = signature;
+}
+
+function renderLedBeatFeedback(playbackMs = resolveCurrentPlaybackMs()) {
   const container = document.getElementById('led-beat-feedback');
   if (!container) {
     return;
@@ -781,50 +869,40 @@ function renderLedBeatFeedback() {
   const leftNotes = getLaneHitNotes('left');
   const rightNotes = getLaneHitNotes('right');
   if (!leftNotes.length && !rightNotes.length) {
+    invalidateLedBeatFeedbackCache();
     container.innerHTML = '<div class="led-beat-feedback-empty">Beat feedback appears after a chart loads.</div>';
     return;
   }
 
   const durationMs = Math.max(resolveWaveformDurationMs(), 1);
-  const playbackMs = resolveCurrentPlaybackMs();
   const rows = [
     { lane: 'left', label: 'L', notes: leftNotes },
     { lane: 'right', label: 'R', notes: rightNotes },
   ];
+  ensureLedBeatFeedbackMarkers(container, rows, durationMs);
 
-  container.innerHTML = rows.map(({ lane, label, notes }) => {
-    const markers = notes.map((noteTimeMs) => {
-      const leftPercent = Math.max(
-        0,
-        Math.min(((Number(noteTimeMs) || 0) / durationMs) * 100, 100)
-      );
+  for (const { lane } of rows) {
+    for (const markerRef of ledBeatFeedbackMarkerRefs[lane]) {
+      const { element, noteTimeMs } = markerRef;
       const result = getLaneNoteResult(lane, noteTimeMs, playbackMs);
-      return `
-        <span
-          class="led-beat-feedback-marker ${result}"
-          style="left: ${leftPercent.toFixed(3)}%;"
-          title="${lane} @ ${formatMs(noteTimeMs)}: ${result}"
-        ></span>
-      `;
-    }).join('');
-
-    return `
-      <div class="led-beat-feedback-row" data-lane="${lane}">
-        <span class="led-beat-feedback-label">${label}</span>
-        <div class="led-beat-feedback-track">${markers}</div>
-      </div>
-    `;
-  }).join('');
+      element.className = `led-beat-feedback-marker ${result}`;
+      element.title = `${lane} @ ${formatMs(noteTimeMs)}: ${result}`;
+    }
+  }
 }
 
-function renderVisualizer() {
+function renderVisualizer(playbackMs = resolveCurrentPlaybackMs()) {
   const canvas = document.getElementById('visualizer');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
-  const width = canvas.width;
-  const height = canvas.height;
+  const width = Math.max(canvas.clientWidth || canvas.width || 0, 1);
+  const height = Math.max(canvas.clientHeight || canvas.height || 0, 1);
+  if (canvas.width !== width) {
+    canvas.width = width;
+  }
+  if (canvas.height !== height) {
+    canvas.height = height;
+  }
 
   ctx.clearRect(0, 0, width, height);
 
@@ -834,7 +912,7 @@ function renderVisualizer() {
   const ledY = (height - ledHeight) / 2;
   ctx.drawImage(getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight), 0, 0);
   renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth);
-  renderLedBeatFeedback();
+  renderLedBeatFeedback(playbackMs);
 }
 
 function renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth) {
@@ -967,10 +1045,10 @@ function resolveCurrentPlaybackMs(fallbackMs = state.sessionProgressMs) {
   return Math.max(Number(fallbackMs) || 0, 0);
 }
 
-function renderGameMeta() {
+function renderGameMeta(playbackMs = resolveCurrentPlaybackMs()) {
   const currentTimeEl = document.getElementById('game-current-time');
   if (currentTimeEl) {
-    currentTimeEl.textContent = formatPlaybackTime(resolveCurrentPlaybackMs());
+    currentTimeEl.textContent = formatPlaybackTime(playbackMs);
   }
 
   const trackLengthEl = document.getElementById('game-track-length');
@@ -978,10 +1056,9 @@ function renderGameMeta() {
     trackLengthEl.textContent = formatPlaybackTime(resolveWaveformDurationMs());
   }
 
-  renderLedBeatFeedback();
 }
 
-function renderDebugPanel() {
+function renderDebugPanel(playbackMs = resolveCurrentPlaybackMs()) {
   const remainingEl = document.getElementById('debug-remaining-time');
   if (remainingEl) {
     remainingEl.textContent = formatMs(state.remainingMs);
@@ -1008,7 +1085,7 @@ function renderDebugPanel() {
 
   renderLaneLog('left-lane-log', 'left');
   renderLaneLog('right-lane-log', 'right');
-  renderGameMeta();
+  renderLedBeatFeedback(playbackMs);
 }
 
 function handleBarFrame(payload) {
@@ -1025,8 +1102,7 @@ function handleBarFrame(payload) {
     window.setTimeout(() => {
       if (state.activeBars[key]?.hit_time_ms === payload.hit_time_ms) {
         delete state.activeBars[key];
-        renderVisualizer();
-        renderDebugPanel();
+        scheduleGameUiRender();
       }
     }, 250);
   }
@@ -1038,8 +1114,7 @@ function handleBarFrame(payload) {
   });
 
   state.remainingMs = Math.max(payload.remaining_ms, 0);
-  renderVisualizer();
-  renderDebugPanel();
+  scheduleGameUiRender();
 }
 
 function recordButtonPress(lane) {
@@ -1056,8 +1131,7 @@ function recordButtonPress(lane) {
   if (judgementResult.triggerHit && Number.isFinite(judgementResult.noteTimeMs)) {
     recordLaneNoteResult(lane, judgementResult.noteTimeMs, judgementResult.judgement);
   }
-  renderLedBeatFeedback();
-  renderDebugPanel();
+  scheduleGameUiRender();
 }
 
 function resetSessionState() {
@@ -1078,9 +1152,13 @@ function resetSessionState() {
     window.cancelAnimationFrame(gameWaveformRenderRafId);
     gameWaveformRenderRafId = 0;
   }
-  renderVisualizer();
+  if (gameUiRenderRafId) {
+    window.cancelAnimationFrame(gameUiRenderRafId);
+    gameUiRenderRafId = 0;
+  }
+  invalidateLedBeatFeedbackCache();
+  renderGameUi(0);
   renderGameSpectralWaveform(0);
-  renderDebugPanel();
 }
 
 function updateUI() {
@@ -1116,7 +1194,7 @@ function connectWebSocket() {
         }
         updateUI();
         scheduleGameSpectralWaveformRender();
-        renderDebugPanel();
+        scheduleGameUiRender();
         return;
       }
 
@@ -1138,8 +1216,7 @@ function connectWebSocket() {
           void startPendingAudioPlayback(state.sessionProgressMs);
         }
         scheduleGameSpectralWaveformRender(state.sessionProgressMs);
-        renderVisualizer();
-        renderDebugPanel();
+        scheduleGameUiRender(state.sessionProgressMs);
         return;
       }
 
@@ -1192,9 +1269,10 @@ async function loadChart(songId) {
       throw new Error('failed to load chart');
     }
     const chartData = await response.json();
-  state.chart = chartData;
-  state.noteHitResults = createLaneNoteResults();
-  ensureGameWaveformController()?.invalidateOverviewCache();
+    state.chart = chartData;
+    state.noteHitResults = createLaneNoteResults();
+    invalidateLedBeatFeedbackCache();
+    ensureGameWaveformController()?.invalidateOverviewCache();
     state.chartDurationMs = computeTrackDuration(chartData);
     const descriptors = chartData?.audio_analysis?.beat_descriptors;
     if (Array.isArray(descriptors) && descriptors.length > 0) {
@@ -1212,8 +1290,7 @@ async function loadChart(songId) {
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
     scheduleGameSpectralWaveformRender(0);
-    renderLedBeatFeedback();
-    renderDebugPanel();
+    scheduleGameUiRender(0);
   } catch (error) {
     console.error('Failed to load chart:', error);
   }
@@ -1313,7 +1390,7 @@ function init() {
         state.sessionProgressMs = 0;
         state.remainingMs = state.chartDurationMs;
         state.pendingStartSongId = songId;
-        renderDebugPanel();
+        scheduleGameUiRender(0);
 
         socket.send(JSON.stringify({
           type: 'start_session',
@@ -1347,13 +1424,13 @@ function init() {
   ['loadedmetadata', 'durationchange'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
       refreshGameTimingLayout();
-      renderGameMeta();
+      scheduleGameUiRender(resolveCurrentPlaybackMs());
       scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
     });
   });
   ['timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
-      renderGameMeta();
+      scheduleGameUiRender(resolveCurrentPlaybackMs());
       scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
       if (shouldAnimateGamePlayback()) {
         ensureGamePlaybackRenderLoop();
@@ -1364,7 +1441,7 @@ function init() {
   });
 
   setDebugVisibility(state.debugVisible);
-  renderDebugPanel();
+  renderGameUi(0);
   initGameWaveform();
   ensureGameWaveformController();
   applyGameWaveformZoom({ preferExisting: true });
