@@ -10,7 +10,7 @@ from typing import Annotated, Final
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from rythm_jump.models.chart import (
     AudioAnalysis,
@@ -38,6 +38,13 @@ _AUTO_PATTERN_DOUBLE_NOTE_MIN_GAP: Final[int] = 2
 _AUTO_PATTERN_DOUBLE_NOTE_LOW_BAND_THRESHOLD: Final[float] = 0.55
 
 _SONG_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class SongDownloadRequest(BaseModel):
+    """Describe a remote audio download request."""
+
+    song_id: str
+    source_url: str
 
 
 def _charts_root_dir() -> Path:
@@ -76,6 +83,14 @@ def _load_librosa() -> ModuleType:
         message = "librosa_not_available"
         raise RuntimeError(message) from exc
     return librosa
+
+
+def _load_yt_dlp() -> ModuleType:
+    try:
+        return importlib.import_module("yt_dlp")
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        message = "yt_dlp_not_available"
+        raise RuntimeError(message) from exc
 
 
 def _safe_sample(series: np.ndarray, index: int) -> float:
@@ -509,6 +524,60 @@ def get_audio(song_id: str) -> FileResponse:
     return FileResponse(audio_path)
 
 
+def _write_default_chart(song_id: str, chart_path: Path) -> None:
+    default_chart = Chart(
+        song_id=song_id,
+        bpm=120.0,
+        travel_time_ms=1200,
+        global_offset_ms=0,
+        judgement_windows_ms=JudgementWindowsMs(perfect=50, good=100),
+        left=[],
+        right=[],
+    )
+    chart_path.write_text(
+        json.dumps(
+            default_chart.model_dump(mode="json", exclude_none=True),
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _ensure_song_chart(song_id: str, song_dir: Path) -> None:
+    chart_path = song_dir / "chart.json"
+    if chart_path.exists():
+        return
+    _write_default_chart(song_id, chart_path)
+
+
+def _download_song_audio(song_id: str, source_url: str) -> Path:
+    song_dir = _charts_root_dir() / song_id
+    song_dir.mkdir(parents=True, exist_ok=True)
+    for existing_audio in song_dir.glob("audio.*"):
+        if existing_audio.is_file():
+            existing_audio.unlink()
+
+    yt_dlp = _load_yt_dlp()
+    output_template = str(song_dir / "audio.%(ext)s")
+    with yt_dlp.YoutubeDL(
+        {
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "no_warnings": True,
+            "outtmpl": output_template,
+            "quiet": True,
+            "restrictfilenames": True,
+        },
+    ) as downloader:
+        downloader.extract_info(source_url, download=True)
+
+    audio_path = _audio_file_for_song(song_id)
+    if audio_path is None:
+        message = "downloaded_audio_missing"
+        raise ValueError(message)
+    return audio_path
+
+
 @router.post("/songs")
 async def upload_song(
     song_id: Annotated[str, Form(...)],
@@ -528,26 +597,34 @@ async def upload_song(
     with audio_path.open("wb") as buffer:
         buffer.write(await audio.read())
 
-    chart_path = song_dir / "chart.json"
-    if not chart_path.exists():
-        default_chart = Chart(
-            song_id=song_id,
-            bpm=120.0,
-            travel_time_ms=1200,
-            global_offset_ms=0,
-            judgement_windows_ms=JudgementWindowsMs(perfect=50, good=100),
-            left=[],
-            right=[],
-        )
-        chart_path.write_text(
-            json.dumps(
-                default_chart.model_dump(mode="json", exclude_none=True),
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    _ensure_song_chart(song_id, song_dir)
 
     return {"ok": True, "song_id": song_id}
+
+
+@router.post("/songs/download")
+def download_song(request: SongDownloadRequest) -> dict[str, object]:
+    """Download remote audio into a managed song slot."""
+    if not _SONG_ID_PATTERN.fullmatch(request.song_id):
+        raise HTTPException(status_code=400, detail="invalid_song_id")
+
+    source_url = request.source_url.strip()
+    if not source_url:
+        raise HTTPException(status_code=400, detail="missing_source_url")
+
+    try:
+        audio_path = _download_song_audio(request.song_id, source_url)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="downloader_unavailable") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="song_download_failed") from exc
+
+    _ensure_song_chart(request.song_id, audio_path.parent)
+    return {
+        "ok": True,
+        "song_id": request.song_id,
+        "audio_filename": audio_path.name,
+    }
 
 
 @router.put("/charts/{song_id}")

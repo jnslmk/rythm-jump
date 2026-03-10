@@ -36,18 +36,55 @@
         <header class="section-header">
           <h2>Add New Song</h2>
         </header>
-        <form id="upload-form" class="flex-gap">
-          <label>
-            <span class="label">Song ID</span>
-            <input id="new-song-id" type="text" placeholder="my-awesome-song" required class="input-control" />
-          </label>
-          <label>
-            <span class="label">Audio File</span>
-            <input id="new-song-audio" type="file" accept="audio/*" required class="input-control" />
-          </label>
-          <button type="submit" class="accent-button">Upload</button>
-          <output id="upload-status" role="status" aria-live="polite"></output>
-        </form>
+        <div class="song-source-tabs" role="tablist" aria-label="Song import methods">
+          <button
+            id="tab-upload-song"
+            type="button"
+            class="song-source-tab active"
+            data-mode="upload"
+            aria-selected="true"
+          >
+            Upload File
+          </button>
+          <button
+            id="tab-download-song"
+            type="button"
+            class="song-source-tab"
+            data-mode="download"
+            aria-selected="false"
+          >
+            Download URL
+          </button>
+        </div>
+        <div id="song-source-upload" class="song-source-panel">
+          <form id="upload-form" class="flex-gap">
+            <label>
+              <span class="label">Song ID</span>
+              <input id="new-song-id" type="text" placeholder="my-awesome-song" required class="input-control" />
+            </label>
+            <label>
+              <span class="label">Audio File</span>
+              <input id="new-song-audio" type="file" accept="audio/*" required class="input-control" />
+            </label>
+            <button type="submit" class="accent-button">Upload</button>
+            <output id="upload-status" role="status" aria-live="polite"></output>
+          </form>
+        </div>
+        <div id="song-source-download" class="song-source-panel hidden" aria-hidden="true">
+          <form id="download-form" class="flex-gap">
+            <label>
+              <span class="label">Song ID</span>
+              <input id="download-song-id" type="text" placeholder="soundcloud-import" required class="input-control" />
+            </label>
+            <label class="song-download-url-field">
+              <span class="label">Source URL</span>
+              <input id="download-song-url" type="url" placeholder="https://soundcloud.com/..." required class="input-control" />
+            </label>
+            <button type="submit" class="accent-button">Download</button>
+            <output id="download-status" role="status" aria-live="polite"></output>
+          </form>
+          <p class="beat-grid-hint">Supports SoundCloud and other sources supported by <code>yt-dlp</code>.</p>
+        </div>
       </section>
 
       <section id="edit-song" class="surface surface-plain">

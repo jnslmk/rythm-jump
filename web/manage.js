@@ -89,6 +89,38 @@ function refreshChartDirtyState() {
   updateControlStates();
 }
 
+function setSongSourceMode(mode) {
+  const normalizedMode = mode === 'download' ? 'download' : 'upload';
+  const panels = {
+    upload: document.getElementById('song-source-upload'),
+    download: document.getElementById('song-source-download')
+  };
+  const tabs = {
+    upload: document.getElementById('tab-upload-song'),
+    download: document.getElementById('tab-download-song')
+  };
+
+  for (const entry of ['upload', 'download']) {
+    const panel = panels[entry];
+    const tab = tabs[entry];
+    const isActive = entry === normalizedMode;
+    if (panel) {
+      panel.classList.toggle('hidden', !isActive);
+      panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+    }
+    if (tab) {
+      tab.classList.toggle('active', isActive);
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+  }
+}
+
+async function handleSongImportSuccess(songId, status, message) {
+  status.textContent = message;
+  window.localStorage.setItem(MANAGE_SELECTED_SONG_KEY, songId);
+  await fetchSongs();
+}
+
 function setChartDirtyBaseline() {
   if (!currentSongId) {
     state.chartBaselineSignature = '';
@@ -913,31 +945,39 @@ function init() {
     }
   });
   
-  document.getElementById('upload-form').addEventListener('submit', async (e) => {
+  const uploadTab = document.getElementById('tab-upload-song');
+  const downloadTab = document.getElementById('tab-download-song');
+  uploadTab?.addEventListener('click', () => {
+    setSongSourceMode('upload');
+  });
+  downloadTab?.addEventListener('click', () => {
+    setSongSourceMode('download');
+  });
+  setSongSourceMode('upload');
+
+  document.getElementById('upload-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const songId = document.getElementById('new-song-id').value;
     const audioFile = document.getElementById('new-song-audio').files[0];
     const status = document.getElementById('upload-status');
-    
-    if (!songId || !audioFile) return;
-    
+
+    if (!songId || !audioFile || !status) return;
+
     status.textContent = 'Uploading...';
     const uploadBtn = e.target.querySelector('button[type="submit"]');
     if (uploadBtn) uploadBtn.disabled = true;
-    
+
     const formData = new FormData();
     formData.append('song_id', songId);
     formData.append('audio', audioFile);
-    
+
     try {
       const res = await fetch(`${apiBaseUrl}/songs`, {
         method: 'POST',
         body: formData
       });
       if (res.ok) {
-        status.textContent = 'Upload complete!';
-        window.localStorage.setItem(MANAGE_SELECTED_SONG_KEY, songId);
-        await fetchSongs();
+        await handleSongImportSuccess(songId, status, 'Upload complete!');
       } else {
         throw new Error('Upload failed');
       }
@@ -945,6 +985,41 @@ function init() {
       status.textContent = 'Error: ' + e.message;
     } finally {
       if (uploadBtn) uploadBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('download-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const songId = document.getElementById('download-song-id').value.trim();
+    const sourceUrl = document.getElementById('download-song-url').value.trim();
+    const status = document.getElementById('download-status');
+
+    if (!songId || !sourceUrl || !status) return;
+
+    status.textContent = 'Downloading...';
+    const downloadBtn = e.target.querySelector('button[type="submit"]');
+    if (downloadBtn) downloadBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${apiBaseUrl}/songs/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          song_id: songId,
+          source_url: sourceUrl
+        })
+      });
+      if (res.ok) {
+        await handleSongImportSuccess(songId, status, 'Download complete!');
+        setSongSourceMode('upload');
+      } else {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.detail || 'Download failed');
+      }
+    } catch (e) {
+      status.textContent = 'Error: ' + e.message;
+    } finally {
+      if (downloadBtn) downloadBtn.disabled = false;
     }
   });
   
