@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from rythm_jump.api import ws as ws_module
+from rythm_jump import audio_analysis
 from rythm_jump.models.chart import Chart
 
 ACTUAL_AUDIO_DURATION_MS = 198897
@@ -25,12 +25,12 @@ def test_playback_duration_prefers_audio_file_length(
 ) -> None:
     chart = Chart.model_validate(_chart_payload())
     monkeypatch.setattr(
-        ws_module,
-        "_audio_duration_ms",
+        audio_analysis,
+        "audio_duration_ms",
         lambda _path: ACTUAL_AUDIO_DURATION_MS,
     )
 
-    duration_ms = ws_module.resolve_playback_duration_ms(chart, Path("audio.mp3"))
+    duration_ms = audio_analysis.resolve_playback_duration_ms(chart, Path("audio.mp3"))
 
     assert duration_ms == ACTUAL_AUDIO_DURATION_MS
 
@@ -62,8 +62,8 @@ def test_playback_duration_falls_back_to_analysis_duration(
         ],
     }
     chart = Chart.model_validate(payload)
-    monkeypatch.setattr(ws_module, "_audio_duration_ms", lambda _path: 0)
+    monkeypatch.setattr(audio_analysis, "audio_duration_ms", lambda _path: 0)
 
-    duration_ms = ws_module.resolve_playback_duration_ms(chart, Path("audio.mp3"))
+    duration_ms = audio_analysis.resolve_playback_duration_ms(chart, Path("audio.mp3"))
 
     assert duration_ms == ANALYZED_AUDIO_DURATION_MS

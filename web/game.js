@@ -1397,13 +1397,8 @@ async function startAudioPlayback(songId, startMs = 0) {
     audio.load();
   }
   audio.currentTime = Math.max(startMs, 0) / 1000;
-  const previousMuted = audio.muted;
   audio.muted = true;
-  try {
-    await audio.play();
-  } finally {
-    audio.muted = previousMuted;
-  }
+  await audio.play();
 }
 
 async function startPendingAudioPlayback(progressMs = 0) {

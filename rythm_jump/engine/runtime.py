@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable
 from contextlib import suppress
-from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from rythm_jump.engine.chart_loader import load_chart
 from rythm_jump.engine.led_frames import (
     DEFAULT_STRIP_LEN,
     InputPulse,
@@ -17,11 +14,15 @@ from rythm_jump.engine.led_frames import (
     build_led_frame,
 )
 from rythm_jump.engine.session import GameSession, State
-from rythm_jump.engine.types import Lane, LaneInputEvent
-from rythm_jump.models.chart import Chart
+from rythm_jump.hw.audio_playback import AudioPlayer, NoOpAudioPlayer
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from rythm_jump.engine.types import Lane
+    from rythm_jump.models.chart import Chart
 
 EventPayload = dict[str, object]
-TickDurationResolver = Callable[[Chart, Path], int]
 
 TICK_INTERVAL_S = 1 / 60
 
@@ -54,6 +55,7 @@ class GameRuntime:
         *,
         session: GameSession | None = None,
         strip_len: int = DEFAULT_STRIP_LEN,
+        audio_player: AudioPlayer | None = None,
     ) -> None:
         """Initialize the runtime with session state and optional outputs."""
         self.session = session or GameSession()
@@ -61,13 +63,14 @@ class GameRuntime:
         self.progress_ms = 0
         self.song_id = ""
         self.chart: Chart | None = None
+        self.audio_path: Path | None = None
         self.duration_ms = 0
         self._playback_task: asyncio.Task[None] | None = None
         self._event_sinks: set[EventSink] = set()
         self._led_outputs: dict[str, LedOutput] = {}
-        self._input_events: list[LaneInputEvent] = []
         self._lane_pulses: list[InputPulse] = []
         self._lock = asyncio.Lock()
+        self._audio_player = audio_player or NoOpAudioPlayer()
 
     async def add_event_sink(self, sink: EventSink) -> None:
         """Register an event sink and send the current session state."""
@@ -97,18 +100,26 @@ class GameRuntime:
             event["song_id"] = self.song_id
         return event
 
-    async def start(self, *, song_id: str, chart: Chart, duration_ms: int) -> bool:
+    async def start(
+        self,
+        *,
+        song_id: str,
+        chart: Chart,
+        duration_ms: int,
+        audio_path: Path | None = None,
+    ) -> bool:
         """Start playback for the provided chart."""
         async with self._lock:
             await self._cancel_playback_task()
             self.chart = chart
+            self.audio_path = audio_path
             self.duration_ms = duration_ms
             self.song_id = song_id
             self.progress_ms = 0
-            self._input_events = []
             self._lane_pulses = []
             self.session.stop()
             self.session.start()
+            await self._play_audio(start_ms=0)
             await self._broadcast(self.session_state_event())
             self._playback_task = asyncio.create_task(self._run_playback())
             return True
@@ -118,6 +129,7 @@ class GameRuntime:
         async with self._lock:
             self.session.stop()
             await self._cancel_playback_task()
+            await self._stop_audio()
             self.progress_ms = 0
             self._lane_pulses = []
             await self._emit_current_led_frame()
@@ -128,6 +140,7 @@ class GameRuntime:
         async with self._lock:
             changed = self.session.pause()
             if changed:
+                await self._pause_audio()
                 await self._broadcast(self.session_state_event())
             return changed
 
@@ -136,15 +149,13 @@ class GameRuntime:
         async with self._lock:
             changed = self.session.resume()
             if changed:
+                await self._play_audio(start_ms=self.progress_ms)
                 await self._broadcast(self.session_state_event())
             return changed
 
     async def submit_lane_input(self, lane: Lane, *, source: str) -> None:
         """Deliver a lane press to the engine."""
         progress_ms = self.progress_ms
-        self._input_events.append(
-            LaneInputEvent(lane=lane, source=source, progress_ms=progress_ms),
-        )
         self._lane_pulses.append(InputPulse(lane=lane, started_ms=progress_ms))
         await self._broadcast(
             {
@@ -159,6 +170,7 @@ class GameRuntime:
     async def close(self) -> None:
         """Tear down runtime tasks cleanly."""
         await self.stop()
+        await _maybe_await(self._audio_player.close())
 
     async def _cancel_playback_task(self) -> None:
         if self._playback_task is None:
@@ -200,6 +212,7 @@ class GameRuntime:
                     break
                 await asyncio.sleep(TICK_INTERVAL_S)
         finally:
+            await self._stop_audio()
             self.session.stop()
             self.progress_ms = 0
             self._lane_pulses = []
@@ -237,7 +250,6 @@ class GameRuntime:
                 progress_ms=self.progress_ms,
                 left_hit_times=[],
                 right_hit_times=[],
-                input_events=self._input_events,
                 input_pulses=self._lane_pulses,
             )
 
@@ -248,7 +260,6 @@ class GameRuntime:
                 progress_ms=self.progress_ms,
                 left_hit_times=[],
                 right_hit_times=[],
-                input_events=self._input_events,
                 input_pulses=self._lane_pulses,
             )
 
@@ -258,9 +269,19 @@ class GameRuntime:
             progress_ms=self.progress_ms,
             left_hit_times=self.chart.left,
             right_hit_times=self.chart.right,
-            input_events=self._input_events,
             input_pulses=self._lane_pulses,
         )
+
+    async def _play_audio(self, *, start_ms: int) -> None:
+        if self.audio_path is None:
+            return
+        await _maybe_await(self._audio_player.play(self.audio_path, start_ms=start_ms))
+
+    async def _pause_audio(self) -> None:
+        await _maybe_await(self._audio_player.pause())
+
+    async def _stop_audio(self) -> None:
+        await _maybe_await(self._audio_player.stop())
 
     async def _write_led_frame(self, frame: LedFrame) -> None:
         for output in tuple(self._led_outputs.values()):
@@ -272,15 +293,3 @@ class GameRuntime:
                 await sink.publish(event)
             except Exception:  # noqa: BLE001
                 self._event_sinks.discard(sink)
-
-
-def load_runtime_chart(
-    *,
-    chart_path: Path,
-    audio_path: Path,
-    duration_resolver: TickDurationResolver,
-) -> tuple[Chart, int]:
-    """Load a chart and resolve the playback duration."""
-    chart = load_chart(chart_path)
-    duration_ms = duration_resolver(chart, audio_path)
-    return chart, duration_ms

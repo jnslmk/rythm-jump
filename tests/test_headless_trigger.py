@@ -1,8 +1,6 @@
 import pytest
 
 from rythm_jump.engine.io import PollingInputSource
-from rythm_jump.headless import run_headless_step
-from rythm_jump.main import run_headless_polling_step
 
 
 class _FakeRuntime:
@@ -22,7 +20,7 @@ async def test_run_headless_step_ignores_idle_states() -> None:
         read_states=lambda: {"left": False, "right": False},
     )
 
-    triggered = await run_headless_step(source)
+    triggered = await source.poll_once()
 
     assert triggered is False
     assert runtime.events == []
@@ -46,16 +44,16 @@ async def test_run_headless_step_submits_rising_edge_only() -> None:
         read_states=lambda: next(states),
     )
 
-    assert await run_headless_step(source) is False
-    assert await run_headless_step(source) is True
-    assert await run_headless_step(source) is False
-    assert await run_headless_step(source) is False
-    assert await run_headless_step(source) is True
+    assert await source.poll_once() is False
+    assert await source.poll_once() is True
+    assert await source.poll_once() is False
+    assert await source.poll_once() is False
+    assert await source.poll_once() is True
     assert runtime.events == [("left", "jump_box"), ("left", "jump_box")]
 
 
 @pytest.mark.anyio
-async def test_run_headless_polling_step_uses_input_source() -> None:
+async def test_poll_once_uses_input_source() -> None:
     runtime = _FakeRuntime()
     source = PollingInputSource(
         runtime,
@@ -63,5 +61,5 @@ async def test_run_headless_polling_step_uses_input_source() -> None:
         read_states=lambda: {"left": False, "right": True},
     )
 
-    assert await run_headless_polling_step(source) is True
+    assert await source.poll_once() is True
     assert runtime.events == [("right", "jump_box")]

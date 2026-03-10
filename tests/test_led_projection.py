@@ -1,7 +1,6 @@
 import pytest
 
 from rythm_jump.engine.led_frames import InputPulse, build_led_frame, project_bar
-from rythm_jump.engine.types import LaneInputEvent
 
 STRIP_LEN = 120
 HALF_STRIP_LEN = STRIP_LEN // 2
@@ -86,7 +85,6 @@ def test_build_led_frame_projects_note_bars_across_strip() -> None:
         progress_ms=500,
         left_hit_times=[1000],
         right_hit_times=[1000],
-        input_events=[],
         input_pulses=[],
     )
 
@@ -102,7 +100,6 @@ def test_build_led_frame_keeps_left_bar_off_outer_edge_before_hit() -> None:
         progress_ms=900,
         left_hit_times=[1000],
         right_hit_times=[],
-        input_events=[],
         input_pulses=[],
     )
 
@@ -116,7 +113,6 @@ def test_build_led_frame_touches_outer_edge_just_before_hit() -> None:
         progress_ms=999,
         left_hit_times=[1000],
         right_hit_times=[],
-        input_events=[],
         input_pulses=[],
     )
 
@@ -130,7 +126,6 @@ def test_build_led_frame_hides_note_bar_once_hit_time_is_reached() -> None:
         progress_ms=1000,
         left_hit_times=[1000],
         right_hit_times=[1000],
-        input_events=[],
         input_pulses=[],
     )
 
@@ -144,7 +139,6 @@ def test_build_led_frame_overlays_input_pulses_near_center() -> None:
         progress_ms=200,
         left_hit_times=[],
         right_hit_times=[],
-        input_events=[LaneInputEvent(lane="left", source="web", progress_ms=200)],
         input_pulses=[InputPulse(lane="left", started_ms=150)],
     )
 

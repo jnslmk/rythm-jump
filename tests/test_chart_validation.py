@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from rythm_jump.engine.chart_loader import load_chart
+from rythm_jump.song_library import load_chart
 
 TRAVEL_TIME_MS = 1200
 PERFECT_WINDOW_MS = 50

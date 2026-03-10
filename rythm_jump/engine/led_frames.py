@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from rythm_jump.engine.types import Lane, LaneInputEvent
+    from rythm_jump.engine.types import Lane
 
 Side = Literal["left", "right"]
 RgbPixel = tuple[int, int, int]
@@ -83,7 +83,6 @@ def build_led_frame(  # noqa: PLR0913
     progress_ms: int,
     left_hit_times: list[int],
     right_hit_times: list[int],
-    input_events: list[LaneInputEvent],
     input_pulses: list[InputPulse],
 ) -> LedFrame:
     """Build a full LED frame for the current playback progress."""
@@ -121,7 +120,6 @@ def build_led_frame(  # noqa: PLR0913
         color=_RIGHT_PULSE_COLOR,
     )
 
-    _ = input_events
     return LedFrame(
         progress_ms=progress_ms,
         pixels=tuple((red, green, blue) for red, green, blue in pixels),

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from rythm_jump.api import ws as ws_module
+from rythm_jump import song_library
 
 
 @pytest.fixture
@@ -18,5 +18,5 @@ def ws_song_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     (song_dir / "chart.json").write_text(chart_text, encoding="utf-8")
     (song_dir / "audio.mp3").write_bytes(b"ID3")
 
-    monkeypatch.setattr(ws_module, "_charts_root_dir", lambda: tmp_path)
+    monkeypatch.setattr(song_library, "charts_root_dir", lambda: tmp_path)
     return tmp_path

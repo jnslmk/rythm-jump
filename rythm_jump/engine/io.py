@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -55,5 +56,6 @@ async def run_polling_input_worker(
 ) -> None:
     """Poll an input source forever."""
     while True:
-        await source.poll_once()
+        with suppress(RuntimeError, ValueError):
+            await source.poll_once()
         await asyncio.sleep(poll_interval_s)
