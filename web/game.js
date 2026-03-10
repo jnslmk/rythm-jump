@@ -1,6 +1,5 @@
 const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
-const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
 const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
@@ -16,14 +15,6 @@ const KEY_MAPPING = {
   l: 'right',
   Enter: 'right'
 };
-
-function loadDebugVisibility() {
-  const stored = localStorage.getItem(DEBUG_STORAGE_KEY);
-  if (stored === null) {
-    return true;
-  }
-  return stored === 'true';
-}
 
 function loadStoredGameWaveformZoom() {
   const stored = Number(localStorage.getItem(GAME_WAVEFORM_ZOOM_STORAGE_KEY));
@@ -52,7 +43,6 @@ let state = {
   chart: null,
   chartDurationMs: 0,
   spectralRmsMax: 1,
-  debugVisible: loadDebugVisibility(),
   sessionStartMs: null,
   waveformZoom: loadStoredGameWaveformZoom(),
   visibleWaveformWindowRatios: { start: 0, end: 1 },
@@ -160,7 +150,7 @@ function initGameWaveform() {
   gameWaveSurfer.on('ready', () => {
     applyGameWaveformZoom({ preferExisting: true });
     scheduleGameSpectralWaveformRender();
-    renderDebugPanel();
+    renderTimingSummary();
   });
   gameWaveSurfer.on('audioprocess', () => {
     scheduleGameSpectralWaveformRender();
@@ -628,7 +618,7 @@ function renderGameUi(progressMs = state.sessionProgressMs) {
   const playbackMs = resolveCurrentPlaybackMs(progressMs);
   renderGameMeta(playbackMs);
   renderVisualizer(playbackMs);
-  renderDebugPanel(playbackMs);
+  renderTimingSummary(playbackMs);
 }
 
 function scheduleGameUiRender(progressMs = state.sessionProgressMs) {
@@ -1023,19 +1013,6 @@ function renderLaneLog(containerId, lane) {
   renderTimelineList(containerId, entries, renderLaneLogEntry);
 }
 
-function setDebugVisibility(visible) {
-  state.debugVisible = Boolean(visible);
-  localStorage.setItem(DEBUG_STORAGE_KEY, state.debugVisible ? 'true' : 'false');
-  const panel = document.getElementById('debug-panel');
-  if (panel) {
-    panel.classList.toggle('panel-hidden', !state.debugVisible);
-  }
-  const toggle = document.getElementById('btn-toggle-debug');
-  if (toggle) {
-    toggle.textContent = state.debugVisible ? 'Hide overlay' : 'Show overlay';
-  }
-}
-
 function resolveCurrentPlaybackMs(fallbackMs = state.sessionProgressMs) {
   const audio = ensureAudioElement();
   const audioMs = audio ? audio.currentTime * 1000 : Number.NaN;
@@ -1058,14 +1035,9 @@ function renderGameMeta(playbackMs = resolveCurrentPlaybackMs()) {
 
 }
 
-function renderDebugPanel(playbackMs = resolveCurrentPlaybackMs()) {
-  const remainingEl = document.getElementById('debug-remaining-time');
-  if (remainingEl) {
-    remainingEl.textContent = formatMs(state.remainingMs);
-  }
-
-  const perfectEl = document.getElementById('debug-perfect-window');
-  const goodEl = document.getElementById('debug-good-window');
+function renderTimingSummary(playbackMs = resolveCurrentPlaybackMs()) {
+  const perfectEl = document.getElementById('game-perfect-window');
+  const goodEl = document.getElementById('game-good-window');
   if (state.chart?.judgement_windows_ms) {
     const windows = state.chart.judgement_windows_ms;
     if (perfectEl) {
@@ -1416,10 +1388,6 @@ function init() {
     await loadChart(songId);
   });
 
-  document.getElementById('btn-toggle-debug').addEventListener('click', () => {
-    setDebugVisibility(!state.debugVisible);
-  });
-
   const audio = ensureAudioElement();
   ['loadedmetadata', 'durationchange'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
@@ -1440,7 +1408,6 @@ function init() {
     });
   });
 
-  setDebugVisibility(state.debugVisible);
   renderGameUi(0);
   initGameWaveform();
   ensureGameWaveformController();

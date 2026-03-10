@@ -4,7 +4,7 @@ import pytest
 from playwright.sync_api import Error, sync_playwright
 
 
-def test_game_debug_overlay_lists_each_trigger_once() -> None:
+def test_game_timing_summary_renders_without_debug_overlay() -> None:
     game_js_path = Path(__file__).resolve().parents[1] / "web" / "game.js"
 
     with sync_playwright() as playwright:
@@ -24,7 +24,6 @@ def test_game_debug_overlay_lists_each_trigger_once() -> None:
     <select id="song-select"></select>
     <button id="btn-start" type="button">Start Game</button>
     <button id="btn-stop" type="button">Stop</button>
-    <button id="btn-toggle-debug" type="button">Hide overlay</button>
     <div id="waveform"></div>
     <div id="game-spectral-waveform-scroll" style="width: 960px; overflow-x: auto;">
       <canvas
@@ -44,14 +43,11 @@ def test_game_debug_overlay_lists_each_trigger_once() -> None:
       style="width: 960px; height: 72px;"
     ></canvas>
     <canvas id="visualizer" width="960" height="70"></canvas>
+    <div id="led-beat-feedback"></div>
+    <p id="game-perfect-window">Perfect ±0 ms</p>
+    <p id="game-good-window">Good ±0 ms</p>
     <dd id="game-current-time"></dd>
     <dd id="game-track-length"></dd>
-    <dd id="debug-remaining-time"></dd>
-    <dd id="debug-perfect-window"></dd>
-    <dd id="debug-good-window"></dd>
-    <div id="left-lane-log"></div>
-    <div id="right-lane-log"></div>
-    <aside id="debug-panel"></aside>
     <audio id="song-audio" preload="auto"></audio>
   </body>
 </html>
@@ -84,7 +80,6 @@ def test_game_debug_overlay_lists_each_trigger_once() -> None:
 
     constructor() {
       this.readyState = MockWebSocket.OPEN;
-      window.__mockSocket = this;
       setTimeout(() => this.onopen?.(), 0);
     }
 
@@ -103,13 +98,14 @@ def test_game_debug_overlay_lists_each_trigger_once() -> None:
     }
   });
 
-  window.SpectralWaveform = {
-    MIN_SPECTRAL_RMS: 0.001,
-    createController() {
-      return {
-        attach() {},
-        renderMain() {},
-        renderOverview() {},
+      window.SpectralWaveform = {
+        MIN_SPECTRAL_RMS: 0.001,
+        createController() {
+          return {
+            attach() {},
+            invalidateOverviewCache() {},
+            renderMain() {},
+            renderOverview() {},
         scheduleOverviewRender() {},
         setVisibleWindowStart() {},
         stopOverviewDrag() {},
@@ -165,30 +161,27 @@ def test_game_debug_overlay_lists_each_trigger_once() -> None:
 """,
         )
         page.add_script_tag(path=str(game_js_path))
-        page.evaluate(
+        result = page.evaluate(
             """async () => {
           document.dispatchEvent(new Event('DOMContentLoaded'));
-          await new Promise((resolve) => setTimeout(resolve, 20));
           const select = document.getElementById('song-select');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          select.innerHTML = '<option value="debug-song">debug-song</option>';
           select.value = 'debug-song';
           select.dispatchEvent(new Event('change'));
           await new Promise((resolve) => setTimeout(resolve, 50));
 
-          const payload = {
-            type: 'bar_frame',
-            lane: 'left',
-            hit_time_ms: 1000,
-            progress_ms: 200,
-            remaining_ms: 800,
-            travel_time_ms: 1200
+          return {
+            perfect: document.getElementById('game-perfect-window')?.textContent || '',
+            good: document.getElementById('game-good-window')?.textContent || '',
+            hasDebugPanel: Boolean(document.getElementById('debug-panel')),
+            hasDebugToggle: Boolean(document.getElementById('btn-toggle-debug')),
           };
-          for (let index = 0; index < 3; index += 1) {
-            window.__mockSocket.onmessage({ data: JSON.stringify(payload) });
-          }
         }""",
         )
-
-        trigger_count = page.locator("#left-lane-log .timeline-badge.trigger").count()
         browser.close()
 
-    assert trigger_count == 1
+    assert result["perfect"] == "Perfect ±0.05s"
+    assert result["good"] == "Good ±0.10s"
+    assert result["hasDebugPanel"] is False
+    assert result["hasDebugToggle"] is False

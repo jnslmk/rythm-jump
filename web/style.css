@@ -632,6 +632,32 @@ textarea {
   color: var(--text-muted);
 }
 
+.game-timing-summary {
+  width: min(960px, 100%);
+  margin: 0.9rem auto 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  background: rgba(15, 23, 42, 0.35);
+  text-align: left;
+}
+
+.game-timing-summary .label {
+  margin: 0 0 0.45rem;
+}
+
+.game-timing-windows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.game-timing-windows p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
 #waveform-container {
   margin: 1.5rem 0;
   border-radius: 1rem;
@@ -753,40 +779,10 @@ textarea {
 }
 
 #save-status,
-#upload-status {
+#upload-status,
+#download-status {
   font-weight: 600;
   color: var(--accent);
-}
-
-.debug-panel {
-  margin-top: 1.75rem;
-}
-
-.debug-panel.panel-hidden {
-  display: none;
-}
-
-.debug-toggle-wrapper {
-  display: flex;
-  justify-content: flex-end;
-  margin: 1.5rem 0 0;
-}
-
-.debug-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.debug-body .debug-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding: 0;
 }
 
 .timing-windows dd {
@@ -909,10 +905,5 @@ textarea {
   .game-meta-row {
     flex-direction: column;
     gap: 0.45rem;
-  }
-
-  .debug-body .debug-row {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
