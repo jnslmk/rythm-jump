@@ -1,10 +1,12 @@
 const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
-const CLOCK_DECAY = 0.85;
-const DEBUG_STORAGE_KEY = 'rhythmJumpDebugVisible';
-const SPECTRAL_MODE_STORAGE_KEY = 'rhythmJumpSpectralMode';
+const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
-const MIN_SPECTRAL_RMS = 0.001;
+const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
+const GAME_WAVEFORM_ZOOM_MIN = 1;
+const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
+const GAME_NOTE_SNAP_MAX_MS = 180;
+const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
 
 const KEY_MAPPING = {
   a: 'left',
@@ -14,109 +16,89 @@ const KEY_MAPPING = {
   Enter: 'right'
 };
 
-function loadDebugVisibility() {
-  const stored = localStorage.getItem(DEBUG_STORAGE_KEY);
-  if (stored === null) {
-    return true;
+function loadStoredGameWaveformZoom() {
+  const stored = Number(localStorage.getItem(GAME_WAVEFORM_ZOOM_STORAGE_KEY));
+  if (!Number.isFinite(stored) || stored < GAME_WAVEFORM_ZOOM_MIN) {
+    return GAME_WAVEFORM_ZOOM_MIN;
   }
-  return stored === 'true';
+  return stored;
 }
 
-function loadSpectralMode() {
-  const stored = localStorage.getItem(SPECTRAL_MODE_STORAGE_KEY);
-  if (stored === 'live' || stored === 'off') {
-    return stored;
-  }
-  return 'precomputed';
+function createLaneNoteResults() {
+  return { left: new Map(), right: new Map() };
 }
 
 let state = {
   songId: '',
   runStatus: 'idle',
-  lastAction: 'none',
   levels: [0, 0],
+  ledPixels: [],
   songs: [],
   activeBars: {},
   triggerTimeline: { left: [], right: [] },
   pressTimeline: { left: [], right: [] },
   remainingMs: 0,
   sessionProgressMs: 0,
+  pendingStartSongId: null,
   chart: null,
   chartDurationMs: 0,
-  spectralMode: loadSpectralMode(),
   spectralRmsMax: 1,
-  debugVisible: loadDebugVisibility(),
   sessionStartMs: null,
+  waveformZoom: loadStoredGameWaveformZoom(),
+  visibleWaveformWindowRatios: { start: 0, end: 1 },
+  gameBeatSlots: [],
+  gameBeatSlotTimesMs: [],
+  gameBeatSlotBaseGapMs: 1,
+  gameNoteSlotSets: { left: new Set(), right: new Set() },
+  noteHitResults: createLaneNoteResults(),
 };
 
 let gameWaveSurfer = null;
-let analyzerContext = null;
-let analyzerNode = null;
-let analyzerData = null;
-let audioSourceNode = null;
+let gameWaveformController = null;
+let gameWaveformRenderRafId = 0;
+let gamePlaybackRenderRafId = 0;
+let gameUiRenderRafId = 0;
+let pendingGameWaveformProgressMs = 0;
+let pendingGameUiProgressMs = 0;
+let gameBeatGridWindowRenderRafId = 0;
+let lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
+let visualizerBackgroundCanvas = null;
+let visualizerBackgroundCacheWidth = 0;
+let visualizerBackgroundCacheHeight = 0;
+let ledBeatFeedbackSignature = '';
+let ledBeatFeedbackMarkerRefs = { left: [], right: [] };
 
 function isSessionPlaying() {
   return state.runStatus === 'playing';
+}
+
+function isSessionPaused() {
+  return state.runStatus === 'paused';
 }
 
 function updateControlStates() {
   const startBtn = document.getElementById('btn-start');
   const stopBtn = document.getElementById('btn-stop');
   const playing = isSessionPlaying();
+  const paused = isSessionPaused();
 
   if (startBtn) {
-    startBtn.textContent = playing ? 'Pause Game' : 'Start Game';
-    startBtn.classList.toggle('ghost-button', playing);
-    startBtn.classList.toggle('accent-button', !playing);
+    startBtn.textContent = playing ? 'Pause Game' : (paused ? 'Resume Game' : 'Start Game');
+    startBtn.classList.add('accent-button');
+    startBtn.classList.remove('ghost-button');
   }
 
   if (stopBtn) {
-    stopBtn.disabled = !playing;
+    stopBtn.classList.add('ghost-button');
+    stopBtn.classList.remove('accent-button');
+    stopBtn.disabled = !playing && !paused;
   }
-}
-
-function updateSpectralModeSelector() {
-  const select = document.getElementById('spectral-mode-select');
-  if (!select) return;
-  select.value = state.spectralMode;
-}
-
-function setSpectralMode(mode) {
-  const supported = ['precomputed', 'live', 'off'];
-  if (!supported.includes(mode)) {
-    return;
-  }
-  state.spectralMode = mode;
-  localStorage.setItem(SPECTRAL_MODE_STORAGE_KEY, mode);
-  updateSpectralModeSelector();
-  renderGameSpectralWaveform();
 }
 
 function stopAudioPlayback() {
   const audio = ensureAudioElement();
   audio.pause();
   audio.currentTime = 0;
-}
-
-function ensureLiveAnalyzer(audio) {
-  if (typeof window.AudioContext === 'undefined' && typeof window.webkitAudioContext === 'undefined') {
-    return;
-  }
-  if (!analyzerContext) {
-    const ContextCtor = window.AudioContext || window.webkitAudioContext;
-    analyzerContext = new ContextCtor();
-    analyzerNode = analyzerContext.createAnalyser();
-    analyzerNode.fftSize = 512;
-    analyzerNode.smoothingTimeConstant = 0.8;
-  }
-  if (!audioSourceNode) {
-    audioSourceNode = analyzerContext.createMediaElementSource(audio);
-    audioSourceNode.connect(analyzerNode);
-    analyzerNode.connect(analyzerContext.destination);
-  }
-  if (!analyzerData || analyzerData.length !== analyzerNode.frequencyBinCount) {
-    analyzerData = new Uint8Array(analyzerNode.frequencyBinCount);
-  }
 }
 
 function requestStopSession(clearScreen) {
@@ -131,14 +113,27 @@ function requestStopSession(clearScreen) {
   updateUI();
 }
 
+function requestPauseSession() {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'pause_session' }));
+  }
+  ensureAudioElement().pause();
+  state.runStatus = 'paused';
+  updateUI();
+}
+
+async function requestResumeSession() {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'resume_session' }));
+  }
+  await startAudioPlayback(state.songId, state.sessionProgressMs);
+  state.runStatus = 'playing';
+  updateUI();
+}
+
 function initGameWaveform() {
   if (gameWaveSurfer) return;
   if (typeof WaveSurfer === 'undefined') return;
-
-  const Timeline = window.TimelinePlugin || WaveSurfer.Timeline || (WaveSurfer.plugins && WaveSurfer.plugins.Timeline);
-  const timelinePlugin = Timeline
-    ? Timeline.create({ container: '#game-timeline' })
-    : null;
 
   const config = {
     container: '#waveform',
@@ -151,16 +146,14 @@ function initGameWaveform() {
     responsive: true
   };
 
-  if (timelinePlugin) {
-    config.plugins = [timelinePlugin];
-  }
-
   gameWaveSurfer = WaveSurfer.create(config);
   gameWaveSurfer.on('ready', () => {
-    renderGameSpectralWaveform();
+    applyGameWaveformZoom({ preferExisting: true });
+    scheduleGameSpectralWaveformRender();
+    renderTimingSummary();
   });
   gameWaveSurfer.on('audioprocess', () => {
-    renderGameSpectralWaveform();
+    scheduleGameSpectralWaveformRender();
   });
 }
 
@@ -170,7 +163,7 @@ function loadGameWaveform(songId) {
   if (!gameWaveSurfer) return;
   const url = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
   gameWaveSurfer.load(url);
-  renderGameSpectralWaveform(0);
+  scheduleGameSpectralWaveformRender(0);
 }
 
 function formatMs(value) {
@@ -178,6 +171,16 @@ function formatMs(value) {
     return '--';
   }
   return `${(value / 1000).toFixed(2)}s`;
+}
+
+function formatPlaybackTime(value) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    return '--';
+  }
+  const totalSeconds = Math.floor(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function computeChartDuration(chart) {
@@ -189,7 +192,47 @@ function computeChartDuration(chart) {
   return Math.max(leftMax, rightMax) + chart.travel_time_ms;
 }
 
+function getAnalysisDurationMs(chart) {
+  const analysis = chart?.audio_analysis;
+  if (!analysis) {
+    return 0;
+  }
+  const explicitDurationMs = Number(analysis.duration_ms) || 0;
+  if (explicitDurationMs > 0) {
+    return explicitDurationMs;
+  }
+  const beatDurationMs = Array.isArray(analysis.beat_times_ms) && analysis.beat_times_ms.length > 0
+    ? Math.max(...analysis.beat_times_ms.map((value) => Number(value) || 0))
+    : 0;
+  const descriptorDurationMs = Array.isArray(analysis.beat_descriptors)
+    && analysis.beat_descriptors.length > 0
+    ? Math.max(...analysis.beat_descriptors.map((descriptor) => Number(descriptor.time_ms) || 0))
+    : 0;
+  return Math.max(beatDurationMs, descriptorDurationMs);
+}
+
+function computeTrackDuration(chart) {
+  const analysisDurationMs = getAnalysisDurationMs(chart);
+  if (analysisDurationMs > 0) {
+    return analysisDurationMs;
+  }
+  return computeChartDuration(chart);
+}
+
+function getAudioDurationMs() {
+  const audio = ensureAudioElement();
+  const audioDurationMs = (audio?.duration || 0) * 1000;
+  if (Number.isFinite(audioDurationMs) && audioDurationMs > 0) {
+    return audioDurationMs;
+  }
+  return 0;
+}
+
 function resolveWaveformDurationMs() {
+  const audioDurationMs = getAudioDurationMs();
+  if (audioDurationMs > 0) {
+    return audioDurationMs;
+  }
   const waveDurationMs = (gameWaveSurfer?.getDuration?.() || 0) * 1000;
   if (Number.isFinite(waveDurationMs) && waveDurationMs > 0) {
     return waveDurationMs;
@@ -204,103 +247,427 @@ function resolveWaveformDurationMs() {
   return 1;
 }
 
-function drawSpectralTimeAxis(ctx, width, height, durationMs) {
-  const axisY = height - 16;
-  const labelY = height - 4;
-  const tickCount = 8;
-
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, axisY);
-  ctx.lineTo(width, axisY);
-  ctx.stroke();
-
-  ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
-  ctx.font = "10px 'Space Grotesk', sans-serif";
-  for (let i = 0; i <= tickCount; i += 1) {
-    const ratio = i / tickCount;
-    const x = ratio * width;
-    const seconds = ((durationMs * ratio) / 1000).toFixed(1);
-    ctx.beginPath();
-    ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + 4);
-    ctx.stroke();
-    ctx.fillText(`${seconds}s`, Math.min(x + 2, width - 26), labelY);
+function ensureGameWaveformController() {
+  if (gameWaveformController || !window.SpectralWaveform) {
+    return gameWaveformController;
   }
+
+  gameWaveformController = window.SpectralWaveform.createController({
+    canvas: '#game-spectral-waveform',
+    scrollContainer: '#game-spectral-waveform-scroll',
+    overviewCanvas: '#game-spectral-waveform-overview',
+    emptyMessage: 'Run Analyze Song in Manage Songs to generate colors.',
+    getAnalysis: () => state.chart?.audio_analysis || null,
+    getBeatTimesMs: () => state.chart?.audio_analysis?.beat_times_ms || [],
+    getDurationMs: resolveWaveformDurationMs,
+    getProgressMs: () => resolveCurrentPlaybackMs(state.sessionProgressMs),
+    getRmsMax: () => state.spectralRmsMax,
+    getZoom: () => state.waveformZoom || 1,
+    onScroll: () => {
+      scheduleGameBeatGridWindowRender();
+    },
+    onVisibleWindowChange: (ratios) => {
+      state.visibleWaveformWindowRatios = ratios;
+      scheduleGameBeatGridWindowRender();
+    },
+    shouldAutoFollow: () => isSessionPlaying(),
+    showTimeAxis: false
+  });
+  gameWaveformController.attach();
+  return gameWaveformController;
 }
 
-function drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs = []) {
-  if (!Array.isArray(beatTimesMs) || beatTimesMs.length === 0) {
+function getGameWaveformZoom() {
+  const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+  return Math.max(GAME_WAVEFORM_ZOOM_MIN, durationMs / GAME_WAVEFORM_TARGET_WINDOW_MS);
+}
+
+function updateVisibleWaveformWindowRatios(scrollContainer) {
+  const controller = ensureGameWaveformController();
+  if (!controller) {
+    state.visibleWaveformWindowRatios = { start: 0, end: 1 };
+    return state.visibleWaveformWindowRatios;
+  }
+  state.visibleWaveformWindowRatios = controller.updateVisibleWindowRatios(scrollContainer);
+  return state.visibleWaveformWindowRatios;
+}
+
+function applyGameWaveformZoom(options = {}) {
+  const preferExisting = options.preferExisting === true;
+  ensureGameWaveformController();
+  const spectralWaveform = document.getElementById('game-spectral-waveform');
+  const beatGrid = document.getElementById('game-zoom-beat-grid');
+  const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
+  if (!spectralWaveform) {
     return;
   }
-  for (let i = 0; i < beatTimesMs.length; i += 1) {
-    const beatMs = Number(beatTimesMs[i]) || 0;
-    const x = (beatMs / durationMs) * width;
-    const isBarStart = i % 4 === 0;
-    ctx.strokeStyle = isBarStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
-    ctx.lineWidth = isBarStart ? 2 : 1;
-    ctx.beginPath();
-    ctx.moveTo(x, 2);
-    ctx.lineTo(x, axisY);
-    ctx.stroke();
+  const computedZoom = getGameWaveformZoom();
+  state.waveformZoom = preferExisting
+    ? Math.max(state.waveformZoom, computedZoom, GAME_WAVEFORM_ZOOM_MIN)
+    : computedZoom;
+  localStorage.setItem(
+    GAME_WAVEFORM_ZOOM_STORAGE_KEY,
+    String(state.waveformZoom.toFixed(6))
+  );
+  const widthPercent = `${Math.max(state.waveformZoom * 100, 100)}%`;
+  spectralWaveform.style.width = widthPercent;
+  if (beatGrid) {
+    beatGrid.style.width = widthPercent;
   }
+  updateVisibleWaveformWindowRatios(scrollContainer);
+  scheduleGameBeatGridWindowRender();
+  scheduleGameSpectralWaveformRender();
+}
+
+function getSortedBeatTimesMs() {
+  const beatTimes = state.chart?.audio_analysis?.beat_times_ms;
+  if (!Array.isArray(beatTimes) || beatTimes.length === 0) {
+    return [];
+  }
+  const sanitized = beatTimes
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  const unique = [];
+  for (let i = 0; i < sanitized.length; i += 1) {
+    if (i === 0 || Math.abs(sanitized[i] - sanitized[i - 1]) > 1) {
+      unique.push(sanitized[i]);
+    }
+  }
+  return unique;
+}
+
+function buildGameBeatSlots() {
+  const beatTimes = getSortedBeatTimesMs();
+  if (beatTimes.length === 0) {
+    state.gameBeatSlots = [];
+    state.gameNoteSlotSets = { left: new Set(), right: new Set() };
+    return;
+  }
+
+  const slots = [];
+  for (let i = 0; i < beatTimes.length; i += 1) {
+    const timeMs = beatTimes[i];
+    slots.push({ timeMs, isBeatStart: true, beatIndex: i });
+    if (i < beatTimes.length - 1) {
+      const nextMs = beatTimes[i + 1];
+      const midMs = timeMs + ((nextMs - timeMs) * 0.5);
+      slots.push({ timeMs: midMs, isBeatStart: false, beatIndex: i });
+    }
+  }
+  slots.sort((a, b) => a.timeMs - b.timeMs);
+  const slotTimes = slots.map((slot) => slot.timeMs);
+  const slotGaps = [];
+  for (let i = 1; i < slotTimes.length; i += 1) {
+    const gapMs = slotTimes[i] - slotTimes[i - 1];
+    if (gapMs > 0) {
+      slotGaps.push(gapMs);
+    }
+  }
+  const baseGapMs = slotGaps.length > 0
+    ? slotGaps.sort((a, b) => a - b)[Math.floor(slotGaps.length / 2)]
+    : Math.max(resolveWaveformDurationMs() / Math.max(slots.length, 1), 1);
+  state.gameBeatSlots = slots;
+  state.gameBeatSlotTimesMs = slotTimes;
+  state.gameBeatSlotBaseGapMs = Math.max(baseGapMs, 1);
+  state.gameNoteSlotSets = {
+    left: mapNotesToBeatSlotIndexes(state.chart?.left || []),
+    right: mapNotesToBeatSlotIndexes(state.chart?.right || [])
+  };
+  lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
+}
+
+function lowerBoundGameBeatSlotIndex(targetMs) {
+  if (!state.gameBeatSlotTimesMs.length) {
+    return 0;
+  }
+  let low = 0;
+  let high = state.gameBeatSlotTimesMs.length - 1;
+  let answer = state.gameBeatSlotTimesMs.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((state.gameBeatSlotTimesMs[mid] || 0) >= targetMs) {
+      answer = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return answer;
+}
+
+function upperBoundGameBeatSlotIndex(targetMs) {
+  if (!state.gameBeatSlotTimesMs.length) {
+    return 0;
+  }
+  let low = 0;
+  let high = state.gameBeatSlotTimesMs.length - 1;
+  let answer = 0;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((state.gameBeatSlotTimesMs[mid] || 0) <= targetMs) {
+      answer = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return answer;
+}
+
+function findNearestGameBeatSlotIndex(targetMs) {
+  if (!state.gameBeatSlots.length) {
+    return -1;
+  }
+  const rightIndex = lowerBoundGameBeatSlotIndex(targetMs);
+  if (rightIndex <= 0) {
+    return 0;
+  }
+  if (rightIndex >= state.gameBeatSlots.length) {
+    return state.gameBeatSlots.length - 1;
+  }
+  const leftIndex = rightIndex - 1;
+  const leftDistance = Math.abs((state.gameBeatSlots[leftIndex]?.timeMs || 0) - targetMs);
+  const rightDistance = Math.abs((state.gameBeatSlots[rightIndex]?.timeMs || 0) - targetMs);
+  return leftDistance <= rightDistance ? leftIndex : rightIndex;
+}
+
+function mapNotesToBeatSlotIndexes(noteTimesMs) {
+  const mapped = new Set();
+  if (!Array.isArray(noteTimesMs) || !state.gameBeatSlots.length) {
+    return mapped;
+  }
+
+  for (const noteTime of noteTimesMs) {
+    const targetMs = Number(noteTime);
+    if (!Number.isFinite(targetMs)) {
+      continue;
+    }
+    const slotIndex = findNearestGameBeatSlotIndex(targetMs);
+    if (slotIndex < 0) {
+      continue;
+    }
+    const slotTimeMs = state.gameBeatSlots[slotIndex]?.timeMs || 0;
+    const prevTime = state.gameBeatSlots[slotIndex - 1]?.timeMs ?? slotTimeMs;
+    const nextTime = state.gameBeatSlots[slotIndex + 1]?.timeMs ?? slotTimeMs;
+    const localGapMs = Math.max(
+      Math.min(Math.abs(slotTimeMs - prevTime), Math.abs(nextTime - slotTimeMs)),
+      1
+    );
+    const snapThresholdMs = Math.min(GAME_NOTE_SNAP_MAX_MS, localGapMs * 0.48);
+    if (Math.abs(slotTimeMs - targetMs) <= snapThresholdMs) {
+      mapped.add(slotIndex);
+    }
+  }
+
+  return mapped;
+}
+
+function renderGameBeatGrid() {
+  const beatGrid = document.getElementById('game-zoom-beat-grid');
+  if (!beatGrid) {
+    return;
+  }
+
+  beatGrid.innerHTML = '';
+  beatGrid.style.gridTemplateColumns = '1fr';
+  if (!state.gameBeatSlots.length) {
+    beatGrid.innerHTML = '<p class="beat-grid-empty">Beat grid will appear after a song loads.</p>';
+    lastRenderedGameBeatGridRange = { startIndex: -1, endIndex: -1 };
+    return;
+  }
+
+  const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+  const visibleWindow = state.visibleWaveformWindowRatios;
+  const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+  const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+  const baseGapMs = Math.max(state.gameBeatSlotBaseGapMs || 1, 1);
+  const overscanMs = baseGapMs * GAME_BEAT_GRID_OVERSCAN_SLOTS;
+  const startIndex = lowerBoundGameBeatSlotIndex(Math.max(0, visibleStartMs - overscanMs));
+  const endIndex = upperBoundGameBeatSlotIndex(Math.min(durationMs, visibleEndMs + overscanMs));
+  const clampedStart = Math.max(0, Math.min(startIndex, state.gameBeatSlots.length - 1));
+  const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
+  const firstMs = state.gameBeatSlots[clampedStart]?.timeMs || 0;
+  const contentWidthPx = Math.max(
+    document.getElementById('game-spectral-waveform')?.clientWidth || beatGrid.clientWidth || 0,
+    1
+  );
+  const pxPerMs = contentWidthPx / durationMs;
+  const leadWidthPx = Math.max(firstMs * pxPerMs, 0);
+  const trackParts = [];
+  if (leadWidthPx > 0.0001) {
+    trackParts.push(`${leadWidthPx}px`);
+  }
+  for (let i = clampedStart; i <= clampedEnd; i += 1) {
+    const currentMs = state.gameBeatSlots[i].timeMs;
+    const nextMs = state.gameBeatSlots[i + 1]?.timeMs ?? durationMs;
+    const spanWidthPx = Math.max((nextMs - currentMs) * pxPerMs, 1);
+    trackParts.push(`${spanWidthPx}px`);
+  }
+  const tailStartMs = state.gameBeatSlots[clampedEnd + 1]?.timeMs ?? durationMs;
+  const tailWidthPx = Math.max((durationMs - tailStartMs) * pxPerMs, 0);
+  if (tailWidthPx > 0.0001) {
+    trackParts.push(`${tailWidthPx}px`);
+  }
+  beatGrid.style.gridTemplateColumns = trackParts.join(' ');
+
+  const fragment = document.createDocumentFragment();
+  if (leadWidthPx > 0.0001) {
+    const leadSpacer = document.createElement('div');
+    leadSpacer.className = 'beat-grid-spacer';
+    leadSpacer.setAttribute('aria-hidden', 'true');
+    fragment.appendChild(leadSpacer);
+  }
+
+  for (let index = clampedStart; index <= clampedEnd; index += 1) {
+    const slot = state.gameBeatSlots[index];
+    const column = document.createElement('div');
+    column.className = slot.isBeatStart ? 'beat-column beat-start' : 'beat-column';
+    if (slot.isBeatStart && ((slot.beatIndex % 4) + 4) % 4 === 0) {
+      column.classList.add('bar');
+    }
+
+    const leftCell = document.createElement('div');
+    leftCell.className = 'beat-cell beat-cell-readonly';
+    leftCell.dataset.lane = 'left';
+    leftCell.setAttribute('aria-disabled', 'true');
+    leftCell.textContent = 'L';
+    if (state.gameNoteSlotSets.left.has(index)) {
+      leftCell.classList.add('active');
+    }
+
+    const rightCell = document.createElement('div');
+    rightCell.className = 'beat-cell beat-cell-readonly';
+    rightCell.dataset.lane = 'right';
+    rightCell.setAttribute('aria-disabled', 'true');
+    rightCell.textContent = 'R';
+    if (state.gameNoteSlotSets.right.has(index)) {
+      rightCell.classList.add('active');
+    }
+
+    column.appendChild(leftCell);
+    column.appendChild(rightCell);
+    fragment.appendChild(column);
+  }
+
+  if (tailWidthPx > 0.0001) {
+    const tailSpacer = document.createElement('div');
+    tailSpacer.className = 'beat-grid-spacer';
+    tailSpacer.setAttribute('aria-hidden', 'true');
+    fragment.appendChild(tailSpacer);
+  }
+  beatGrid.appendChild(fragment);
+  lastRenderedGameBeatGridRange = { startIndex: clampedStart, endIndex: clampedEnd };
+}
+
+function scheduleGameBeatGridWindowRender() {
+  if (!state.gameBeatSlots.length) {
+    return;
+  }
+  if (gameBeatGridWindowRenderRafId) {
+    return;
+  }
+  gameBeatGridWindowRenderRafId = window.requestAnimationFrame(() => {
+    gameBeatGridWindowRenderRafId = 0;
+    const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+    const visibleWindow = state.visibleWaveformWindowRatios;
+    const visibleStartMs = Math.max(0, visibleWindow.start * durationMs);
+    const visibleEndMs = Math.max(visibleStartMs, visibleWindow.end * durationMs);
+    const baseGapMs = Math.max(state.gameBeatSlotBaseGapMs || 1, 1);
+    const overscanMs = baseGapMs * GAME_BEAT_GRID_OVERSCAN_SLOTS;
+    const startIndex = lowerBoundGameBeatSlotIndex(Math.max(0, visibleStartMs - overscanMs));
+    const endIndex = upperBoundGameBeatSlotIndex(Math.min(durationMs, visibleEndMs + overscanMs));
+    const clampedStart = Math.max(0, Math.min(startIndex, state.gameBeatSlots.length - 1));
+    const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
+    if (
+      lastRenderedGameBeatGridRange.startIndex === clampedStart
+      && lastRenderedGameBeatGridRange.endIndex === clampedEnd
+    ) {
+      return;
+    }
+    renderGameBeatGrid();
+  });
 }
 
 function renderGameSpectralWaveform(progressMs = state.sessionProgressMs) {
-  const canvas = document.getElementById('game-spectral-waveform');
-  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
-  const beatTimesMs = state.chart?.audio_analysis?.beat_times_ms;
-  if (!canvas) {
+  ensureGameWaveformController()?.renderMain(resolveCurrentPlaybackMs(progressMs));
+}
+
+function refreshGameTimingLayout() {
+  applyGameWaveformZoom({ preferExisting: true });
+  renderGameBeatGrid();
+  scheduleGameBeatGridWindowRender();
+}
+
+function scheduleGameSpectralWaveformRender(progressMs = state.sessionProgressMs) {
+  pendingGameWaveformProgressMs = progressMs;
+  if (shouldAnimateGamePlayback()) {
+    ensureGamePlaybackRenderLoop();
     return;
   }
-  const ctx = canvas.getContext('2d');
-  const width = Math.max(canvas.clientWidth, 1);
-  const height = Math.max(canvas.clientHeight, 1);
-  canvas.width = width;
-  canvas.height = height;
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#020617';
-  ctx.fillRect(0, 0, width, height);
-
-  if (!Array.isArray(descriptors) || descriptors.length === 0) {
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
-    ctx.font = "12px 'Space Grotesk', sans-serif";
-    ctx.fillText('Run Analyze Song in Manage Songs to generate colors.', 16, 24);
+  if (gameWaveformRenderRafId) {
     return;
   }
+  gameWaveformRenderRafId = window.requestAnimationFrame(() => {
+    gameWaveformRenderRafId = 0;
+    renderGameSpectralWaveform(pendingGameWaveformProgressMs);
+  });
+}
 
-  const durationMs = resolveWaveformDurationMs();
-  const axisY = height - 16;
-  const centerY = (axisY - 2) / 2;
-  const maxAmplitude = Math.max(Math.floor((axisY - 4) * 0.45), 8);
-  const rmsMax = Math.max(state.spectralRmsMax || 0, MIN_SPECTRAL_RMS);
-  drawBeatMarkers(ctx, width, axisY, durationMs, beatTimesMs);
+function renderGameUi(progressMs = state.sessionProgressMs) {
+  const playbackMs = resolveCurrentPlaybackMs(progressMs);
+  renderGameMeta(playbackMs);
+  renderVisualizer(playbackMs);
+  renderTimingSummary(playbackMs);
+}
 
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  for (const descriptor of descriptors) {
-    const timeMs = Number(descriptor.time_ms) || 0;
-    const x = (timeMs / durationMs) * width;
-    const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
-    ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
-    ctx.globalAlpha = 0.8;
-    ctx.beginPath();
-    ctx.moveTo(x, centerY - amplitude);
-    ctx.lineTo(x, centerY + amplitude);
-    ctx.stroke();
+function scheduleGameUiRender(progressMs = state.sessionProgressMs) {
+  pendingGameUiProgressMs = progressMs;
+  if (shouldAnimateGamePlayback()) {
+    ensureGamePlaybackRenderLoop();
+    return;
   }
+  if (gameUiRenderRafId) {
+    return;
+  }
+  gameUiRenderRafId = window.requestAnimationFrame(() => {
+    gameUiRenderRafId = 0;
+    renderGameUi(pendingGameUiProgressMs);
+  });
+}
 
-  const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#f8fafc';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(progressX, 0);
-  ctx.lineTo(progressX, axisY);
-  ctx.stroke();
-  drawSpectralTimeAxis(ctx, width, height, durationMs);
+function shouldAnimateGamePlayback() {
+  const audio = ensureAudioElement();
+  return isSessionPlaying() || Boolean(audio && !audio.paused && !audio.ended);
+}
+
+function ensureGamePlaybackRenderLoop() {
+  if (gamePlaybackRenderRafId || !shouldAnimateGamePlayback()) {
+    return;
+  }
+  const renderFrame = () => {
+    gamePlaybackRenderRafId = 0;
+    const playbackMs = resolveCurrentPlaybackMs();
+    renderGameUi(playbackMs);
+    renderGameSpectralWaveform(playbackMs);
+    if (shouldAnimateGamePlayback()) {
+      gamePlaybackRenderRafId = window.requestAnimationFrame(renderFrame);
+    }
+  };
+  gamePlaybackRenderRafId = window.requestAnimationFrame(renderFrame);
+}
+
+function stopGamePlaybackRenderLoop() {
+  if (!gamePlaybackRenderRafId) {
+    return;
+  }
+  window.cancelAnimationFrame(gamePlaybackRenderRafId);
+  gamePlaybackRenderRafId = 0;
+}
+
+function invalidateLedBeatFeedbackCache() {
+  ledBeatFeedbackSignature = '';
+  ledBeatFeedbackMarkerRefs = { left: [], right: [] };
 }
 
 function pushTimelineEntry(timeline, lane, entry) {
@@ -309,6 +676,18 @@ function pushTimelineEntry(timeline, lane, entry) {
   if (bucket.length > MAX_TIMELINE_ENTRIES) {
     bucket.length = MAX_TIMELINE_ENTRIES;
   }
+}
+
+function upsertTriggerTimelineEntry(lane, entry) {
+  const bucket = state.triggerTimeline[lane];
+  const existingIndex = bucket.findIndex(
+    (timelineEntry) => timelineEntry.hitTimeMs === entry.hitTimeMs
+  );
+  if (existingIndex >= 0) {
+    bucket[existingIndex] = entry;
+    return;
+  }
+  pushTimelineEntry(state.triggerTimeline, lane, entry);
 }
 
 let audioElement = null;
@@ -324,150 +703,253 @@ function clampLevel(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function reduceStreamLevels(levels, event) {
-  if (event.type === 'led_frame' && Array.isArray(event.levels)) {
-    return event.levels.map(clampLevel);
+function getCurrentPlaybackProgressMs() {
+  const audio = ensureAudioElement();
+  if (Number.isFinite(audio.currentTime) && audio.currentTime > 0) {
+    return Math.round(audio.currentTime * 1000);
   }
+  return Math.max(state.sessionProgressMs || 0, 0);
+}
 
-  if (event.type === 'lane_event') {
-    const isLeft = event.lane === 'left';
-    const isRight = event.lane === 'right';
-    
-    if (isLeft) {
-      return [1, levels[1]];
+function getLaneHitNotes(lane) {
+  return Array.isArray(state.chart?.[lane]) ? state.chart[lane] : [];
+}
+
+function judgePressTiming(lane) {
+  const notes = getLaneHitNotes(lane);
+  const windows = state.chart?.judgement_windows_ms || { perfect: 0, good: 0 };
+  const pressMs = getCurrentPlaybackProgressMs();
+  let closestDeltaMs = null;
+  let closestNoteTimeMs = null;
+
+  for (const noteTimeMs of notes) {
+    const deltaMs = pressMs - Number(noteTimeMs || 0);
+    if (closestDeltaMs === null || Math.abs(deltaMs) < Math.abs(closestDeltaMs)) {
+      closestDeltaMs = deltaMs;
+      closestNoteTimeMs = Number(noteTimeMs || 0);
     }
-    if (isRight) {
-      return [levels[0], 1];
+  }
+
+  if (closestDeltaMs === null) {
+    return {
+      deltaMs: null,
+      judgement: 'off',
+      pressMs,
+      noteTimeMs: null,
+      triggerHit: false
+    };
+  }
+
+  const absoluteDeltaMs = Math.abs(closestDeltaMs);
+  if (absoluteDeltaMs <= windows.perfect) {
+    return {
+      deltaMs: closestDeltaMs,
+      judgement: 'perfect',
+      pressMs,
+      noteTimeMs: closestNoteTimeMs,
+      triggerHit: true
+    };
+  }
+  if (absoluteDeltaMs <= windows.good) {
+    return {
+      deltaMs: closestDeltaMs,
+      judgement: 'good',
+      pressMs,
+      noteTimeMs: closestNoteTimeMs,
+      triggerHit: true
+    };
+  }
+  return {
+    deltaMs: closestDeltaMs,
+    judgement: 'off',
+    pressMs,
+    noteTimeMs: closestNoteTimeMs,
+    triggerHit: false
+  };
+}
+
+function getNoteResultKey(noteTimeMs) {
+  return String(Math.round(Number(noteTimeMs) || 0));
+}
+
+function recordLaneNoteResult(lane, noteTimeMs, judgement) {
+  if (!lane || !Number.isFinite(noteTimeMs) || !state.noteHitResults[lane]) {
+    return;
+  }
+  const resultKey = getNoteResultKey(noteTimeMs);
+  if (state.noteHitResults[lane].has(resultKey)) {
+    return;
+  }
+  state.noteHitResults[lane].set(resultKey, judgement);
+}
+
+function getLaneNoteResult(lane, noteTimeMs, playbackMs) {
+  const resultKey = getNoteResultKey(noteTimeMs);
+  const stored = state.noteHitResults[lane]?.get(resultKey);
+  if (stored) {
+    return stored;
+  }
+
+  const missWindowMs = Number(state.chart?.judgement_windows_ms?.good) || 0;
+  if (playbackMs > (Number(noteTimeMs) || 0) + missWindowMs) {
+    return 'miss';
+  }
+
+  return 'pending';
+}
+
+function ensureLedBeatFeedbackMarkers(container, rows, durationMs) {
+  const signature = JSON.stringify({
+    durationMs: Math.round(durationMs),
+    rows: rows.map(({ lane, notes }) => ({
+      lane,
+      notes: notes.map((noteTimeMs) => Math.round(Number(noteTimeMs) || 0)),
+    })),
+  });
+  if (ledBeatFeedbackSignature === signature) {
+    return;
+  }
+
+  container.innerHTML = '';
+  ledBeatFeedbackMarkerRefs = { left: [], right: [] };
+  const fragment = document.createDocumentFragment();
+
+  for (const { lane, label, notes } of rows) {
+    const row = document.createElement('div');
+    row.className = 'led-beat-feedback-row';
+    row.dataset.lane = lane;
+
+    const rowLabel = document.createElement('span');
+    rowLabel.className = 'led-beat-feedback-label';
+    rowLabel.textContent = label;
+    row.appendChild(rowLabel);
+
+    const track = document.createElement('div');
+    track.className = 'led-beat-feedback-track';
+    row.appendChild(track);
+
+    for (const noteTimeMs of notes) {
+      const marker = document.createElement('span');
+      const leftPercent = Math.max(
+        0,
+        Math.min(((Number(noteTimeMs) || 0) / durationMs) * 100, 100)
+      );
+      marker.className = 'led-beat-feedback-marker pending';
+      marker.style.left = `${leftPercent.toFixed(3)}%`;
+      track.appendChild(marker);
+      ledBeatFeedbackMarkerRefs[lane].push({
+        element: marker,
+        noteTimeMs: Number(noteTimeMs) || 0,
+      });
+    }
+
+    fragment.appendChild(row);
+  }
+
+  container.appendChild(fragment);
+  ledBeatFeedbackSignature = signature;
+}
+
+function renderLedBeatFeedback(playbackMs = resolveCurrentPlaybackMs()) {
+  const container = document.getElementById('led-beat-feedback');
+  if (!container) {
+    return;
+  }
+
+  const leftNotes = getLaneHitNotes('left');
+  const rightNotes = getLaneHitNotes('right');
+  if (!leftNotes.length && !rightNotes.length) {
+    invalidateLedBeatFeedbackCache();
+    container.innerHTML = '<div class="led-beat-feedback-empty">Beat feedback appears after a chart loads.</div>';
+    return;
+  }
+
+  const durationMs = Math.max(resolveWaveformDurationMs(), 1);
+  const rows = [
+    { lane: 'left', label: 'L', notes: leftNotes },
+    { lane: 'right', label: 'R', notes: rightNotes },
+  ];
+  ensureLedBeatFeedbackMarkers(container, rows, durationMs);
+
+  for (const { lane } of rows) {
+    for (const markerRef of ledBeatFeedbackMarkerRefs[lane]) {
+      const { element, noteTimeMs } = markerRef;
+      const result = getLaneNoteResult(lane, noteTimeMs, playbackMs);
+      element.className = `led-beat-feedback-marker ${result}`;
+      element.title = `${lane} @ ${formatMs(noteTimeMs)}: ${result}`;
     }
   }
-
-  if (event.type === 'clock_tick') {
-    return [clampLevel(levels[0] * CLOCK_DECAY), clampLevel(levels[1] * CLOCK_DECAY)];
-  }
-
-  return levels;
 }
 
-function renderPrecomputedSpectralOverlay(ctx, width, overlayHeight) {
-  const descriptors = state.chart?.audio_analysis?.beat_descriptors;
-  if (!Array.isArray(descriptors) || descriptors.length === 0 || state.chartDurationMs <= 0) {
-    return;
-  }
-
-  const progressMs = state.sessionProgressMs || 0;
-  const rmsMax = state.spectralRmsMax || 1;
-  for (const descriptor of descriptors) {
-    const x = 10 + ((descriptor.time_ms || 0) / state.chartDurationMs) * (width - 20);
-    const rmsRatio = Math.max(0, Math.min((descriptor.rms || 0) / rmsMax, 1));
-    const height = 2 + rmsRatio * (overlayHeight - 4);
-    const ageMs = Math.abs(progressMs - (descriptor.time_ms || 0));
-    const emphasis = ageMs < 160 ? 1 : 0.55;
-    ctx.fillStyle = descriptor.color_hint || '#2dd4bf';
-    ctx.globalAlpha = emphasis;
-    ctx.fillRect(x, overlayHeight - height, 2, height);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function renderLiveSpectralOverlay(ctx, width, overlayHeight) {
-  if (!analyzerNode || !analyzerData) {
-    return;
-  }
-  analyzerNode.getByteFrequencyData(analyzerData);
-  const barWidth = Math.max(width / analyzerData.length, 1);
-  for (let i = 0; i < analyzerData.length; i += 1) {
-    const level = analyzerData[i] / 255;
-    const hue = Math.round((i / analyzerData.length) * 330);
-    const alpha = Math.max(level, 0.15);
-    ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
-    const x = i * barWidth;
-    const barHeight = Math.max(level * overlayHeight, 1);
-    ctx.fillRect(x, overlayHeight - barHeight, Math.ceil(barWidth), barHeight);
-  }
-}
-
-function renderSpectralOverlay(ctx, width, height) {
-  if (state.spectralMode === 'off') {
-    return;
-  }
-  const overlayHeight = Math.min(30, Math.max(16, Math.round(height * 0.4)));
-  if (state.spectralMode === 'live') {
-    renderLiveSpectralOverlay(ctx, width, overlayHeight);
-    return;
-  }
-  renderPrecomputedSpectralOverlay(ctx, width, overlayHeight);
-}
-
-function renderVisualizer() {
+function renderVisualizer(playbackMs = resolveCurrentPlaybackMs()) {
   const canvas = document.getElementById('visualizer');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
-  const width = canvas.width;
-  const height = canvas.height;
-  const centerX = width / 2;
+  const width = Math.max(canvas.clientWidth || canvas.width || 0, 1);
+  const height = Math.max(canvas.clientHeight || canvas.height || 0, 1);
+  if (canvas.width !== width) {
+    canvas.width = width;
+  }
+  if (canvas.height !== height) {
+    canvas.height = height;
+  }
 
   ctx.clearRect(0, 0, width, height);
-  
-  // Background
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, width, height);
-  renderSpectralOverlay(ctx, width, height);
 
-  // LED Strip Representation
   const numLeds = 70;
   const ledWidth = (width - 20) / numLeds;
   const ledHeight = 12;
   const ledY = (height - ledHeight) / 2;
-
-  for (let i = 0; i < numLeds; i++) {
-    const intensity = i < numLeds / 2 ? state.levels[0] : state.levels[1];
-    const distFromCenter = Math.abs(i - (numLeds - 1) / 2) / (numLeds / 2);
-    const ledIntensity = intensity * (1 - distFromCenter * 0.5);
-    
-    ctx.fillStyle = i < numLeds / 2 
-      ? `rgba(59, 130, 246, ${ledIntensity})` 
-      : `rgba(236, 72, 153, ${ledIntensity})`;
-    
-    ctx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
-    
-    // Glow effect
-    if (ledIntensity > 0.1) {
-      ctx.shadowBlur = 10 * ledIntensity;
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.strokeRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
-      ctx.shadowBlur = 0;
-    }
-  }
-
-  renderBars(ctx, width, height, ledY, ledHeight, centerX);
-  renderGameSpectralWaveform();
+  ctx.drawImage(getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight), 0, 0);
+  renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth);
+  renderLedBeatFeedback(playbackMs);
 }
 
-function renderBars(ctx, canvasWidth, canvasHeight, ledY, ledHeight, centerX) {
-  const halfWidth = (canvasWidth - 20) / 2;
-  const barHeight = ledHeight + 14;
-  const barY = ledY - barHeight - 6;
-  Object.values(state.activeBars).forEach((bar) => {
-    const travelMs = bar.travel_time_ms || 1;
-    const ratio = Math.min(Math.max(bar.progress_ms / travelMs, 0), 1);
-    const length = ratio * Math.max(halfWidth - 10, 0);
-    if (length <= 0) {
-      return;
-    }
+function renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth) {
+  if (!Array.isArray(state.ledPixels) || state.ledPixels.length === 0) {
+    return;
+  }
 
-    ctx.fillStyle =
-      bar.lane === 'left'
-        ? 'rgba(59, 130, 246, 0.7)'
-        : 'rgba(236, 72, 153, 0.7)';
-    ctx.fillRect(
-      bar.lane === 'left' ? centerX - length : centerX,
-      barY,
-      length,
-      barHeight
-    );
-  });
+  for (let index = 0; index < Math.min(state.ledPixels.length, numLeds); index += 1) {
+    const pixel = state.ledPixels[index];
+    if (!Array.isArray(pixel) || pixel.length !== 3) {
+      continue;
+    }
+    const [red, green, blue] = pixel.map((value) => Math.max(0, Math.min(255, Number(value) || 0)));
+    if (red === 0 && green === 0 && blue === 0) {
+      continue;
+    }
+    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+    ctx.fillRect(10 + index * ledWidth, ledY, ledWidth - 2, ledHeight);
+  }
+}
+
+function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight) {
+  if (
+    visualizerBackgroundCanvas
+    && visualizerBackgroundCacheWidth === width
+    && visualizerBackgroundCacheHeight === height
+  ) {
+    return visualizerBackgroundCanvas;
+  }
+
+  visualizerBackgroundCanvas = document.createElement('canvas');
+  visualizerBackgroundCanvas.width = width;
+  visualizerBackgroundCanvas.height = height;
+  visualizerBackgroundCacheWidth = width;
+  visualizerBackgroundCacheHeight = height;
+
+  const backgroundCtx = visualizerBackgroundCanvas.getContext('2d');
+  backgroundCtx.clearRect(0, 0, width, height);
+
+  for (let i = 0; i < numLeds; i += 1) {
+    backgroundCtx.fillStyle = i < numLeds / 2
+      ? 'rgba(59, 130, 246, 0.12)'
+      : 'rgba(236, 72, 153, 0.12)';
+    backgroundCtx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
+  }
+
+  return visualizerBackgroundCanvas;
 }
 
 function renderTimelineList(containerId, entries, formatter) {
@@ -484,106 +966,152 @@ function renderTimelineList(containerId, entries, formatter) {
     .join('');
 }
 
-function setDebugVisibility(visible) {
-  state.debugVisible = Boolean(visible);
-  localStorage.setItem(DEBUG_STORAGE_KEY, state.debugVisible ? 'true' : 'false');
-  const panel = document.getElementById('debug-panel');
-  if (panel) {
-    panel.classList.toggle('panel-hidden', !state.debugVisible);
+function formatDeltaMs(deltaMs) {
+  if (!Number.isFinite(deltaMs)) {
+    return 'no chart hit';
   }
-  const toggle = document.getElementById('btn-toggle-debug');
-  if (toggle) {
-    toggle.textContent = state.debugVisible ? 'Hide overlay' : 'Show overlay';
+  const roundedMs = Math.round(deltaMs);
+  if (roundedMs === 0) {
+    return 'on time';
   }
+  return roundedMs > 0 ? `${formatMs(roundedMs)} late` : `${formatMs(Math.abs(roundedMs))} early`;
 }
 
-function renderDebugPanel() {
-  const remainingEl = document.getElementById('debug-remaining-time');
-  if (remainingEl) {
-    remainingEl.textContent = formatMs(state.remainingMs);
+function renderLaneLogEntry(entry) {
+  if (entry.kind === 'trigger') {
+    return [
+      '<span class="timeline-badge trigger">Trigger</span>',
+      `<span class="timeline-main">@${formatMs(entry.hitTimeMs)}</span>`,
+      `<span class="timeline-meta">${formatMs(entry.remainingMs)} left</span>`
+    ].join('');
   }
 
-  const perfectEl = document.getElementById('debug-perfect-window');
-  const goodEl = document.getElementById('debug-good-window');
+  return [
+    '<span class="timeline-badge press">Press</span>',
+    `<span class="timeline-badge ${entry.judgement}">${entry.judgement}</span>`,
+    `<span class="timeline-main">@${entry.label}</span>`,
+    `<span class="timeline-meta">${entry.triggerHit ? 'hit' : 'miss'} · ${formatDeltaMs(entry.deltaMs)}</span>`
+  ].join('');
+}
+
+function renderLaneLog(containerId, lane) {
+  const entries = [
+    ...state.triggerTimeline[lane].map((entry) => ({
+      ...entry,
+      kind: 'trigger',
+      sortTimeMs: entry.hitTimeMs
+    })),
+    ...state.pressTimeline[lane].map((entry) => ({
+      ...entry,
+      kind: 'press',
+      sortTimeMs: entry.pressMs ?? 0
+    }))
+  ]
+    .sort((leftEntry, rightEntry) => rightEntry.sortTimeMs - leftEntry.sortTimeMs)
+    .slice(0, MAX_TIMELINE_ENTRIES);
+
+  renderTimelineList(containerId, entries, renderLaneLogEntry);
+}
+
+function resolveCurrentPlaybackMs(fallbackMs = state.sessionProgressMs) {
+  const audio = ensureAudioElement();
+  const audioMs = audio ? audio.currentTime * 1000 : Number.NaN;
+  if (Number.isFinite(audioMs) && audioMs >= 0) {
+    return audioMs;
+  }
+  return Math.max(Number(fallbackMs) || 0, 0);
+}
+
+function renderGameMeta(playbackMs = resolveCurrentPlaybackMs()) {
+  const currentTimeEl = document.getElementById('game-current-time');
+  if (currentTimeEl) {
+    currentTimeEl.textContent = formatPlaybackTime(playbackMs);
+  }
+
+  const trackLengthEl = document.getElementById('game-track-length');
+  if (trackLengthEl) {
+    trackLengthEl.textContent = formatPlaybackTime(resolveWaveformDurationMs());
+  }
+
+}
+
+function renderTimingSummary(playbackMs = resolveCurrentPlaybackMs()) {
+  const perfectEl = document.getElementById('game-perfect-window');
+  const goodEl = document.getElementById('game-good-window');
   if (state.chart?.judgement_windows_ms) {
     const windows = state.chart.judgement_windows_ms;
     if (perfectEl) {
-      perfectEl.textContent = `Perfect ±${windows.perfect} ms`;
+      perfectEl.textContent = `Perfect ±${formatMs(windows.perfect)}`;
     }
     if (goodEl) {
-      goodEl.textContent = `Good ±${windows.good} ms`;
+      goodEl.textContent = `Good ±${formatMs(windows.good)}`;
     }
   } else {
     if (perfectEl) {
-      perfectEl.textContent = 'Perfect ±0 ms';
+      perfectEl.textContent = 'Perfect ±0.00s';
     }
     if (goodEl) {
-      goodEl.textContent = 'Good ±0 ms';
+      goodEl.textContent = 'Good ±0.00s';
     }
   }
 
-  renderTimelineList(
-    'left-trigger-timeline',
-    state.triggerTimeline.left,
-    (entry) =>
-      `Trigger @${formatMs(entry.hitTimeMs)} (progress ${entry.progressMs} ms · remaining ${entry.remainingMs} ms)`
-  );
-  renderTimelineList(
-    'right-trigger-timeline',
-    state.triggerTimeline.right,
-    (entry) =>
-      `Trigger @${formatMs(entry.hitTimeMs)} (progress ${entry.progressMs} ms · remaining ${entry.remainingMs} ms)`
-  );
-  renderTimelineList(
-    'left-press-timeline',
-    state.pressTimeline.left,
-    (entry) => `Press @${entry.label} (${entry.source})`
-  );
-  renderTimelineList(
-    'right-press-timeline',
-    state.pressTimeline.right,
-    (entry) => `Press @${entry.label} (${entry.source})`
-  );
+  renderLaneLog('left-lane-log', 'left');
+  renderLaneLog('right-lane-log', 'right');
+  renderLedBeatFeedback(playbackMs);
 }
 
 function handleBarFrame(payload) {
   const key = `${payload.lane}-${payload.hit_time_ms}`;
-  state.activeBars[key] = payload;
+  const travelMs = Math.max(Number(payload.travel_time_ms) || 0, 1);
+  const progressMs = Math.min(Math.max(Number(payload.progress_ms) || 0, 0), travelMs);
+  state.activeBars[key] = {
+    ...payload,
+    progress_ms: progressMs,
+    received_at_ms: performance.now(),
+  };
 
-  if (payload.progress_ms >= payload.travel_time_ms) {
+  if (progressMs >= travelMs) {
     window.setTimeout(() => {
       if (state.activeBars[key]?.hit_time_ms === payload.hit_time_ms) {
         delete state.activeBars[key];
-        renderVisualizer();
-        renderDebugPanel();
+        scheduleGameUiRender();
       }
     }, 250);
   }
 
-  pushTimelineEntry(state.triggerTimeline, payload.lane, {
+  upsertTriggerTimelineEntry(payload.lane, {
     hitTimeMs: payload.hit_time_ms,
     progressMs: payload.progress_ms,
     remainingMs: payload.remaining_ms,
   });
 
   state.remainingMs = Math.max(payload.remaining_ms, 0);
-  renderVisualizer();
-  renderDebugPanel();
+  scheduleGameUiRender();
 }
 
 function recordButtonPress(lane) {
-  const offset = state.sessionStartMs ? Date.now() - state.sessionStartMs : null;
+  const judgementResult = judgePressTiming(lane);
   const entry = {
-    label: offset !== null ? formatMs(offset) : new Date().toLocaleTimeString(),
+    label: formatMs(judgementResult.pressMs),
+    pressMs: judgementResult.pressMs,
     source: 'keyboard',
+    deltaMs: judgementResult.deltaMs,
+    judgement: judgementResult.judgement,
+    triggerHit: judgementResult.triggerHit,
   };
   pushTimelineEntry(state.pressTimeline, lane, entry);
-  renderDebugPanel();
+  if (judgementResult.triggerHit && Number.isFinite(judgementResult.noteTimeMs)) {
+    recordLaneNoteResult(lane, judgementResult.noteTimeMs, judgementResult.judgement);
+  }
+  scheduleGameUiRender();
 }
 
 function resetSessionState() {
   stopAudioPlayback();
   state.activeBars = {};
+  state.ledPixels = [];
+  state.pendingStartSongId = null;
+  state.noteHitResults = createLaneNoteResults();
   state.triggerTimeline.left = [];
   state.triggerTimeline.right = [];
   state.pressTimeline.left = [];
@@ -591,14 +1119,21 @@ function resetSessionState() {
   state.remainingMs = 0;
   state.sessionProgressMs = 0;
   state.sessionStartMs = null;
-  renderVisualizer();
-  renderDebugPanel();
+  stopGamePlaybackRenderLoop();
+  if (gameWaveformRenderRafId) {
+    window.cancelAnimationFrame(gameWaveformRenderRafId);
+    gameWaveformRenderRafId = 0;
+  }
+  if (gameUiRenderRafId) {
+    window.cancelAnimationFrame(gameUiRenderRafId);
+    gameUiRenderRafId = 0;
+  }
+  invalidateLedBeatFeedbackCache();
+  renderGameUi(0);
+  renderGameSpectralWaveform(0);
 }
 
 function updateUI() {
-  document.getElementById('last-action').textContent = state.lastAction;
-  document.getElementById('run-status').textContent = state.runStatus;
-  
   const select = document.getElementById('song-select');
   if (select.options.length <= 1 && state.songs.length > 0) {
     select.innerHTML = '<option value="">Select a song</option>' + 
@@ -621,13 +1156,25 @@ function connectWebSocket() {
       const payload = JSON.parse(event.data);
       if (payload.type === 'session_state') {
         state.runStatus = payload.state;
+        if (typeof payload.progress_ms === 'number') {
+          state.sessionProgressMs = payload.progress_ms;
+        }
+        if (isSessionPlaying()) {
+          ensureGamePlaybackRenderLoop();
+        } else {
+          stopGamePlaybackRenderLoop();
+        }
         updateUI();
-        renderDebugPanel();
+        scheduleGameSpectralWaveformRender();
+        scheduleGameUiRender();
         return;
       }
 
       if (payload.type === 'led_frame' && Array.isArray(payload.levels)) {
         state.levels = payload.levels.map(clampLevel);
+        if (Array.isArray(payload.pixels)) {
+          state.ledPixels = payload.pixels;
+        }
         if (typeof payload.progress_ms === 'number') {
           state.sessionProgressMs = payload.progress_ms;
           if (state.chartDurationMs > 0) {
@@ -637,8 +1184,11 @@ function connectWebSocket() {
             );
           }
         }
-        renderVisualizer();
-        renderDebugPanel();
+        if (state.pendingStartSongId && isSessionPlaying()) {
+          void startPendingAudioPlayback(state.sessionProgressMs);
+        }
+        scheduleGameSpectralWaveformRender(state.sessionProgressMs);
+        scheduleGameUiRender(state.sessionProgressMs);
         return;
       }
 
@@ -647,8 +1197,6 @@ function connectWebSocket() {
         return;
       }
 
-      state.levels = reduceStreamLevels(state.levels, payload);
-      renderVisualizer();
     } catch (e) {
       console.error('WS Error:', e);
     }
@@ -694,7 +1242,10 @@ async function loadChart(songId) {
     }
     const chartData = await response.json();
     state.chart = chartData;
-    state.chartDurationMs = computeChartDuration(chartData);
+    state.noteHitResults = createLaneNoteResults();
+    invalidateLedBeatFeedbackCache();
+    ensureGameWaveformController()?.invalidateOverviewCache();
+    state.chartDurationMs = computeTrackDuration(chartData);
     const descriptors = chartData?.audio_analysis?.beat_descriptors;
     if (Array.isArray(descriptors) && descriptors.length > 0) {
       state.spectralRmsMax = Math.max(
@@ -704,10 +1255,14 @@ async function loadChart(songId) {
     } else {
       state.spectralRmsMax = 1;
     }
+    buildGameBeatSlots();
+    applyGameWaveformZoom({ preferExisting: true });
+    ensureGameWaveformController()?.setVisibleWindowStart(0);
+    renderGameBeatGrid();
     state.remainingMs = state.chartDurationMs;
     loadGameWaveform(songId);
-    renderGameSpectralWaveform(0);
-    renderDebugPanel();
+    scheduleGameSpectralWaveformRender(0);
+    scheduleGameUiRender(0);
   } catch (error) {
     console.error('Failed to load chart:', error);
   }
@@ -719,8 +1274,7 @@ function handleKeydown(event) {
   if (!action) return;
 
   event.preventDefault();
-  state.lastAction = action;
-  
+
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({
       type: 'lane_event',
@@ -746,18 +1300,15 @@ function ensureAudioElement() {
   return audioElement;
 }
 
-async function startAudioPlayback(songId) {
+async function startAudioPlayback(songId, startMs = 0) {
   const audio = ensureAudioElement();
-  if (state.spectralMode === 'live') {
-    ensureLiveAnalyzer(audio);
-    if (analyzerContext?.state === 'suspended') {
-      await analyzerContext.resume();
-    }
-  }
   audio.pause();
-  audio.currentTime = 0;
-  audio.src = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
-  audio.load();
+  const nextSrc = `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`;
+  if (audio.src !== new URL(nextSrc, window.location.href).href) {
+    audio.src = nextSrc;
+    audio.load();
+  }
+  audio.currentTime = Math.max(startMs, 0) / 1000;
   const previousMuted = audio.muted;
   audio.muted = true;
   try {
@@ -767,12 +1318,32 @@ async function startAudioPlayback(songId) {
   }
 }
 
+async function startPendingAudioPlayback(progressMs = 0) {
+  if (!state.pendingStartSongId) return;
+
+  const songId = state.pendingStartSongId;
+  state.pendingStartSongId = null;
+
+  try {
+    await startAudioPlayback(songId, progressMs);
+  } catch (error) {
+    console.error('Playback failed', error);
+    state.runStatus = 'Playback blocked';
+    updateUI();
+  }
+}
+
 function init() {
   const startButton = document.getElementById('btn-start');
   if (startButton) {
     startButton.addEventListener('click', async () => {
       if (isSessionPlaying()) {
-        requestStopSession(false);
+        requestPauseSession();
+        return;
+      }
+
+      if (isSessionPaused()) {
+        await requestResumeSession();
         return;
       }
 
@@ -790,16 +1361,8 @@ function init() {
         state.sessionStartMs = Date.now();
         state.sessionProgressMs = 0;
         state.remainingMs = state.chartDurationMs;
-        renderDebugPanel();
-
-        try {
-          await startAudioPlayback(songId);
-        } catch (error) {
-          console.error('Playback failed', error);
-          state.runStatus = 'Playback blocked';
-          updateUI();
-          return;
-        }
+        state.pendingStartSongId = songId;
+        scheduleGameUiRender(0);
 
         socket.send(JSON.stringify({
           type: 'start_session',
@@ -814,7 +1377,7 @@ function init() {
   const stopButton = document.getElementById('btn-stop');
   if (stopButton) {
     stopButton.addEventListener('click', () => {
-      if (!isSessionPlaying()) return;
+      if (!isSessionPlaying() && !isSessionPaused()) return;
       requestStopSession(true);
     });
   }
@@ -825,40 +1388,41 @@ function init() {
     await loadChart(songId);
   });
 
-  document.getElementById('btn-toggle-debug').addEventListener('click', () => {
-    setDebugVisibility(!state.debugVisible);
+  const audio = ensureAudioElement();
+  ['loadedmetadata', 'durationchange'].forEach((eventName) => {
+    audio.addEventListener(eventName, () => {
+      refreshGameTimingLayout();
+      scheduleGameUiRender(resolveCurrentPlaybackMs());
+      scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
+    });
+  });
+  ['timeupdate', 'seeked', 'play', 'pause', 'ended'].forEach((eventName) => {
+    audio.addEventListener(eventName, () => {
+      scheduleGameUiRender(resolveCurrentPlaybackMs());
+      scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
+      if (shouldAnimateGamePlayback()) {
+        ensureGamePlaybackRenderLoop();
+      } else {
+        stopGamePlaybackRenderLoop();
+      }
+    });
   });
 
-  const spectralModeSelect = document.getElementById('spectral-mode-select');
-  if (spectralModeSelect) {
-    spectralModeSelect.addEventListener('change', (event) => {
-      setSpectralMode(event.target.value);
-    });
-  }
-
-  setDebugVisibility(state.debugVisible);
-  updateSpectralModeSelector();
-  renderDebugPanel();
+  renderGameUi(0);
   initGameWaveform();
+  ensureGameWaveformController();
+  applyGameWaveformZoom({ preferExisting: true });
+  renderGameBeatGrid();
 
-    window.addEventListener('keydown', handleKeydown);
-    window.addEventListener('resize', () => {
-      renderGameSpectralWaveform();
-    });
+  window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('resize', () => {
+    applyGameWaveformZoom();
+    renderGameBeatGrid();
+    scheduleGameSpectralWaveformRender();
+  });
   
   fetchSongs();
   connectWebSocket();
-  
-  // Animation loop for smooth decay if no clock ticks
-    function animate() {
-      state.levels = [
-        clampLevel(state.levels[0] * 0.95),
-        clampLevel(state.levels[1] * 0.95)
-      ];
-      renderVisualizer();
-      window.requestAnimationFrame(animate);
-    }
-  animate();
 }
 
 document.addEventListener('DOMContentLoaded', init);
