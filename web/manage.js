@@ -1,3 +1,5 @@
+/* global FormData, WaveSurfer, performance, requestAnimationFrame */
+
 const apiBaseUrl = '/api';
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
 const MIN_SPECTRAL_RMS = 0.001;

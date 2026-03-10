@@ -1,3 +1,5 @@
+/* global URL, WaveSurfer, localStorage, performance */
+
 const apiBaseUrl = '/api';
 const DEFAULT_SESSION_ID = 'default-session';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
