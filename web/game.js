@@ -7,6 +7,15 @@ const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
 const GAME_NOTE_SNAP_MAX_MS = 180;
 const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
+const ACTIVE_BAR_SPAN = 4;
+const ACTIVE_BAR_FLASH_WINDOW_MS = 260;
+const ACTIVE_BAR_COLORS = {
+  left: 'rgba(90, 210, 255, 0.9)',
+  right: 'rgba(255, 105, 160, 0.9)',
+  perfect: 'rgba(253, 224, 71, 0.98)',
+  good: 'rgba(134, 239, 172, 0.96)',
+  miss: 'rgba(248, 113, 113, 0.96)'
+};
 
 const KEY_MAPPING = {
   a: 'left',
@@ -902,6 +911,7 @@ function renderVisualizer(playbackMs = resolveCurrentPlaybackMs()) {
   const ledY = (height - ledHeight) / 2;
   ctx.drawImage(getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, ledHeight), 0, 0);
   renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth);
+  renderActiveBarFeedback(ctx, playbackMs, ledY, ledHeight, numLeds, ledWidth);
   renderLedBeatFeedback(playbackMs);
 }
 
@@ -921,6 +931,84 @@ function renderLedPixels(ctx, ledY, ledHeight, numLeds, ledWidth) {
     }
     ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
     ctx.fillRect(10 + index * ledWidth, ledY, ledWidth - 2, ledHeight);
+  }
+}
+
+function getActiveBarFlashAlpha(result, hitTimeMs, playbackMs) {
+  if (result === 'pending') {
+    return 0;
+  }
+
+  const elapsedSinceHitMs = playbackMs - hitTimeMs;
+  if (elapsedSinceHitMs < 0 || elapsedSinceHitMs > ACTIVE_BAR_FLASH_WINDOW_MS) {
+    return 0;
+  }
+
+  const decay = 1 - (elapsedSinceHitMs / ACTIVE_BAR_FLASH_WINDOW_MS);
+  const pulse = 0.7 + (0.3 * Math.sin((elapsedSinceHitMs / 28) * Math.PI));
+  return Math.max(0.25, Math.min(decay * pulse, 1));
+}
+
+function getActiveBarColor(result, lane) {
+  return ACTIVE_BAR_COLORS[result] || ACTIVE_BAR_COLORS[lane] || '#f8fafc';
+}
+
+function getActiveBarRange(bar, playbackMs, numLeds) {
+  const lane = bar?.lane;
+  const hitTimeMs = Math.max(Number(bar?.hit_time_ms) || 0, 0);
+  const travelTimeMs = Math.max(Number(bar?.travel_time_ms) || 0, 1);
+  const fallbackProgressMs = Math.min(
+    Math.max(Number(bar?.progress_ms) || 0, 0),
+    travelTimeMs
+  );
+  const alignedProgressMs = window.VisualizerProjection?.getPlaybackAlignedBarProgressMs
+    ? window.VisualizerProjection.getPlaybackAlignedBarProgressMs(
+      hitTimeMs,
+      travelTimeMs,
+      playbackMs,
+      fallbackProgressMs
+    )
+    : fallbackProgressMs;
+  const clampedProgressMs = Math.min(alignedProgressMs, travelTimeMs - Number.EPSILON);
+  const progress = Math.max(clampedProgressMs / travelTimeMs, 0);
+
+  if (window.VisualizerProjection?.getRenderedBarRange) {
+    return window.VisualizerProjection.getRenderedBarRange(
+      numLeds,
+      progress,
+      lane,
+      ACTIVE_BAR_SPAN
+    );
+  }
+
+  return null;
+}
+
+function renderActiveBarFeedback(ctx, playbackMs, ledY, ledHeight, numLeds, ledWidth) {
+  for (const bar of Object.values(state.activeBars)) {
+    const lane = String(bar?.lane || '');
+    if (lane !== 'left' && lane !== 'right') {
+      continue;
+    }
+    const hitTimeMs = Math.max(Number(bar?.hit_time_ms) || 0, 0);
+    const result = getLaneNoteResult(lane, hitTimeMs, playbackMs);
+    const alpha = getActiveBarFlashAlpha(result, hitTimeMs, playbackMs);
+    if (alpha <= 0) {
+      continue;
+    }
+
+    const range = getActiveBarRange(bar, playbackMs, numLeds);
+    if (!range) {
+      continue;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = getActiveBarColor(result, lane);
+    for (let index = range.startIndex; index <= range.endIndex; index += 1) {
+      ctx.fillRect(10 + index * ledWidth, ledY, ledWidth - 2, ledHeight);
+    }
+    ctx.restore();
   }
 }
 
