@@ -10,8 +10,8 @@ class _FakeGpioModule:
     LOW = 0
     HIGH = 1
 
-    def __init__(self, read_value: int) -> None:
-        self.read_value = read_value
+    def __init__(self, values: dict[int, int]) -> None:
+        self.values = values
         self.setup_calls: list[tuple[int, int, int]] = []
         self.mode_calls: list[int] = []
 
@@ -21,25 +21,41 @@ class _FakeGpioModule:
     def setup(self, pin: int, direction: int, pull_up_down: int) -> None:
         self.setup_calls.append((pin, direction, pull_up_down))
 
-    def input(self, _pin: int) -> int:
-        return self.read_value
+    def input(self, pin: int) -> int:
+        return self.values[pin]
 
 
-def test_read_contact_pressed_returns_false_when_gpio_unavailable(
+def test_read_jump_box_states_returns_false_when_gpio_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(gpio_input, "_load_gpio_module", lambda: None)
 
-    assert gpio_input.read_contact_pressed() is False
+    assert gpio_input.read_jump_box_states() == {"left": False, "right": False}
 
 
-def test_read_contact_pressed_uses_active_low_pull_up(
+def test_read_jump_box_states_uses_active_low_pull_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _FakeGpioModule(read_value=_FakeGpioModule.LOW)
+    fake = _FakeGpioModule(values={22: _FakeGpioModule.LOW, 23: _FakeGpioModule.HIGH})
     monkeypatch.setattr(gpio_input, "_load_gpio_module", lambda: fake)
-    monkeypatch.setenv("RHYTHM_CONTACT_PIN", "22")
+    monkeypatch.setenv("RHYTHM_LEFT_CONTACT_PIN", "22")
+    monkeypatch.setenv("RHYTHM_RIGHT_CONTACT_PIN", "23")
+
+    assert gpio_input.read_jump_box_states() == {"left": True, "right": False}
+    assert fake.mode_calls == [_FakeGpioModule.BCM]
+    assert fake.setup_calls == [
+        (22, _FakeGpioModule.IN, _FakeGpioModule.PUD_UP),
+        (23, _FakeGpioModule.IN, _FakeGpioModule.PUD_UP),
+    ]
+
+
+def test_read_contact_pressed_returns_true_when_any_lane_is_pressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gpio_input,
+        "read_jump_box_states",
+        lambda: {"left": False, "right": True},
+    )
 
     assert gpio_input.read_contact_pressed() is True
-    assert fake.mode_calls == [_FakeGpioModule.BCM]
-    assert fake.setup_calls == [(22, _FakeGpioModule.IN, _FakeGpioModule.PUD_UP)]

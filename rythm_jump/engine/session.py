@@ -1,5 +1,7 @@
 """Session management helpers shared by the Rhythm Jump runtime."""
 
+from __future__ import annotations
+
 from enum import StrEnum
 
 
@@ -18,28 +20,30 @@ class GameSession:
         """Initialize the session state machine."""
         self.state = State.IDLE
 
-    def start(self) -> None:
+    def start(self) -> bool:
         """Start the session if it is currently idle."""
-        if self.state == State.IDLE:
-            self.state = State.PLAYING
+        if self.state != State.IDLE:
+            return False
+        self.state = State.PLAYING
+        return True
 
-    def start_from_contact(self) -> None:
-        """Alias to start triggered by a physical contact event."""
-        self.start()
-
-    def pause(self) -> None:
+    def pause(self) -> bool:
         """Pause the session if it is currently playing."""
-        if self.state == State.PLAYING:
-            self.state = State.PAUSED
+        if self.state != State.PLAYING:
+            return False
+        self.state = State.PAUSED
+        return True
 
-    def resume(self) -> None:
+    def resume(self) -> bool:
         """Resume the session if it is currently paused."""
-        if self.state == State.PAUSED:
-            self.state = State.PLAYING
+        if self.state != State.PAUSED:
+            return False
+        self.state = State.PLAYING
+        return True
 
-    def handle_input(self, _lane: str) -> None:
-        """Handle a lane input when the session is playing."""
-        if self.state == State.PLAYING:
-            # Here we would normally trigger scoring/judgement logic.
-            # For now, it's a placeholder.
-            pass
+    def stop(self) -> bool:
+        """Reset the session state to idle."""
+        if self.state == State.IDLE:
+            return False
+        self.state = State.IDLE
+        return True

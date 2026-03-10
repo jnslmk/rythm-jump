@@ -60,16 +60,16 @@ def test_ws_session_broadcasts_lane_events() -> None:
 
         websocket.send_json({"type": "lane_event", "lane": "left"})
         lane_event = _receive_event(websocket, "lane_event")
-        expected_lane_event = {
-            "type": "lane_event",
-            "session_id": "any-id",
-            "lane": "left",
-        }
-        if lane_event != expected_lane_event:
-            pytest.fail(
-                "unexpected lane_event payload: "
-                f"{lane_event!r} != {expected_lane_event!r}",
-            )
+        if lane_event["type"] != "lane_event":
+            pytest.fail("unexpected event type for lane_event")
+        if lane_event["session_id"] != "any-id":
+            pytest.fail("unexpected session_id for lane_event")
+        if lane_event["lane"] != "left":
+            pytest.fail("unexpected lane value for lane_event")
+        if lane_event["source"] != "web":
+            pytest.fail("unexpected source value for lane_event")
+        if not isinstance(lane_event["progress_ms"], int):
+            pytest.fail("unexpected progress value for lane_event")
 
 
 def test_ws_session_controls_start_stop(ws_song_library: object) -> None:

@@ -1,100 +1,67 @@
-from collections.abc import Iterator
-
 import pytest
 
-from rythm_jump.engine.session import GameSession, State
-from rythm_jump.headless import (
-    run_headless_loop,
-    run_headless_step,
-    should_start,
-    trigger_start_if_needed,
-)
+from rythm_jump.engine.io import PollingInputSource
+from rythm_jump.headless import run_headless_step
 from rythm_jump.main import run_headless_polling_step
 
-EXPECTED_PROCESSED_EVENTS = 2
+
+class _FakeRuntime:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    async def submit_lane_input(self, lane: str, *, source: str) -> None:
+        self.events.append((lane, source))
 
 
-def test_should_start_when_contact_pressed() -> None:
-    assert should_start(contact_pressed=True) is True
-    assert should_start(contact_pressed=False) is False
+@pytest.mark.anyio
+async def test_run_headless_step_ignores_idle_states() -> None:
+    runtime = _FakeRuntime()
+    source = PollingInputSource(
+        runtime,
+        name="jump_box",
+        read_states=lambda: {"left": False, "right": False},
+    )
+
+    triggered = await run_headless_step(source)
+
+    assert triggered is False
+    assert runtime.events == []
 
 
-def test_run_headless_step_starts_session_on_contact_press() -> None:
-    session = GameSession()
+@pytest.mark.anyio
+async def test_run_headless_step_submits_rising_edge_only() -> None:
+    runtime = _FakeRuntime()
+    states = iter(
+        [
+            {"left": False, "right": False},
+            {"left": True, "right": False},
+            {"left": True, "right": False},
+            {"left": False, "right": False},
+            {"left": True, "right": False},
+        ],
+    )
+    source = PollingInputSource(
+        runtime,
+        name="jump_box",
+        read_states=lambda: next(states),
+    )
 
-    started = run_headless_step(session=session, contact_pressed=True)
-
-    assert started is True
-    assert session.state == State.PLAYING
-
-
-def test_run_headless_step_ignores_no_press() -> None:
-    session = GameSession()
-
-    assert run_headless_step(session=session, contact_pressed=False) is False
-    assert session.state == State.IDLE
-
-
-def test_trigger_start_if_needed_returns_false_when_already_playing() -> None:
-    session = GameSession()
-    session.start()
-
-    started = trigger_start_if_needed(session=session, contact_pressed=True)
-
-    assert started is False
-    assert session.state == State.PLAYING
-
-
-def test_run_headless_loop_starts_on_first_valid_press_and_stops() -> None:
-    session = GameSession()
-    processed = 0
-
-    def _events() -> Iterator[bool]:
-        nonlocal processed
-        for event in (False, True, True):
-            processed += 1
-            yield event
-
-    started = run_headless_loop(session=session, contact_events=_events())
-
-    assert started is True
-    assert session.state == State.PLAYING
-    assert processed == EXPECTED_PROCESSED_EVENTS
+    assert await run_headless_step(source) is False
+    assert await run_headless_step(source) is True
+    assert await run_headless_step(source) is False
+    assert await run_headless_step(source) is False
+    assert await run_headless_step(source) is True
+    assert runtime.events == [("left", "jump_box"), ("left", "jump_box")]
 
 
-def test_run_headless_loop_returns_false_when_no_start_occurs() -> None:
-    session = GameSession()
-    processed = 0
+@pytest.mark.anyio
+async def test_run_headless_polling_step_uses_input_source() -> None:
+    runtime = _FakeRuntime()
+    source = PollingInputSource(
+        runtime,
+        name="jump_box",
+        read_states=lambda: {"left": False, "right": True},
+    )
 
-    def _events() -> Iterator[bool]:
-        nonlocal processed
-        for event in (False, False):
-            processed += 1
-            yield event
-
-    started = run_headless_loop(session=session, contact_events=_events())
-
-    assert started is False
-    assert session.state == State.IDLE
-    assert processed == EXPECTED_PROCESSED_EVENTS
-
-
-def test_run_headless_polling_step_uses_contact_reader() -> None:
-    session = GameSession()
-    events = iter([False, True])
-
-    assert run_headless_polling_step(session, lambda: next(events)) is False
-    assert session.state == State.IDLE
-
-    assert run_headless_polling_step(session, lambda: next(events)) is True
-    assert session.state == State.PLAYING
-
-
-def test_run_headless_polling_step_uses_default_gpio_reader(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = GameSession()
-    monkeypatch.setattr("rythm_jump.main.read_contact_pressed", lambda: True)
-
-    assert run_headless_polling_step(session) is True
-    assert session.state == State.PLAYING
+    assert await run_headless_polling_step(source) is True
+    assert runtime.events == [("right", "jump_box")]

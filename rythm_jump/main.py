@@ -15,15 +15,16 @@ from rythm_jump import compat  # ensure old stdlib APIs stay available
 from rythm_jump.api.charts import router as charts_router
 from rythm_jump.api.http import router as api_router
 from rythm_jump.api.ws import router as ws_router
-from rythm_jump.engine.session import GameSession
+from rythm_jump.engine.io import PollingInputSource
+from rythm_jump.engine.runtime import GameRuntime
 from rythm_jump.headless import run_headless_step
-from rythm_jump.hw.gpio_input import read_contact_pressed
+from rythm_jump.hw.gpio_input import read_jump_box_states
+from rythm_jump.hw.led_output import Ws2811LedOutput
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
-
+    from collections.abc import AsyncIterator
 
 del compat
 
@@ -32,10 +33,19 @@ FRONTEND_DIR = Path(__file__).parent.parent / "web"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Keep a single shared session alive for the FastAPI app."""
-    session = GameSession()
-    app.state.session = session
-    app.state.polling_task = asyncio.create_task(_headless_polling_worker(session))
+    """Keep a single shared runtime alive for the FastAPI app."""
+    runtime = GameRuntime()
+    runtime.set_led_output("physical", Ws2811LedOutput())
+    app.state.runtime = runtime
+    input_source = PollingInputSource(
+        runtime,
+        name="jump_box",
+        read_states=read_jump_box_states,
+    )
+    app.state.input_source = input_source
+    app.state.polling_task = asyncio.create_task(
+        _headless_polling_worker(input_source),
+    )
 
     yield
 
@@ -45,8 +55,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with suppress(asyncio.CancelledError):
             await task
 
+    await runtime.close()
     app.state.polling_task = None
-    app.state.session = None
+    app.state.input_source = None
+    app.state.runtime = None
 
 
 app = FastAPI(title="Rhythm Jump Backend", lifespan=lifespan)
@@ -58,27 +70,21 @@ if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
 
 
-# Headless polling loop keeps hardware inputs tied to the session.
-
-
-def run_headless_polling_step(
-    session: GameSession,
-    read_contact: Callable[[], bool] | None = None,
+async def run_headless_polling_step(
+    source: PollingInputSource,
 ) -> bool:
-    """Run a single headless iteration, optionally using a custom reader."""
-    contact_reader = read_contact or read_contact_pressed
-    return run_headless_step(session=session, contact_pressed=bool(contact_reader()))
+    """Run a single headless iteration for the configured input source."""
+    return await run_headless_step(source)
 
 
 async def _headless_polling_worker(
-    session: GameSession,
-    read_contact: Callable[[], bool] | None = None,
-    poll_interval_s: float = 0.05,
+    source: PollingInputSource,
+    poll_interval_s: float = 0.01,
 ) -> None:
-    """Poll for contact events and drive the shared session continually."""
+    """Poll for contact events and drive the shared runtime continually."""
     while True:
         try:
-            run_headless_polling_step(session=session, read_contact=read_contact)
+            await source.poll_once()
         except (RuntimeError, ValueError):
             logger.exception("headless poll error")
         await asyncio.sleep(poll_interval_s)

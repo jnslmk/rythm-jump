@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from rythm_jump.main import app
 
 _EXPECTED_LED_LEVELS = 2
+_EXPECTED_LED_COUNT = 70
 
 
 def test_start_session_emits_led_frame(ws_song_library: object) -> None:
@@ -32,6 +33,10 @@ def test_start_session_emits_led_frame(ws_song_library: object) -> None:
             pytest.fail("led_frame payload missing levels key")
         if len(led_frame["levels"]) != _EXPECTED_LED_LEVELS:
             pytest.fail("led_frame levels should contain two entries")
+        if "pixels" not in led_frame:
+            pytest.fail("led_frame payload missing pixels key")
+        if len(led_frame["pixels"]) != _EXPECTED_LED_COUNT:
+            pytest.fail("led_frame pixels should contain one entry per LED")
 
 
 def test_playback_emits_bar_frame_event(ws_song_library: object) -> None:

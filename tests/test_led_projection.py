@@ -1,6 +1,7 @@
 import pytest
 
-from rythm_jump.engine.led_frames import project_bar
+from rythm_jump.engine.led_frames import InputPulse, build_led_frame, project_bar
+from rythm_jump.engine.types import LaneInputEvent
 
 STRIP_LEN = 120
 HALF_STRIP_LEN = STRIP_LEN // 2
@@ -73,3 +74,49 @@ def test_infinite_progress_raises_value_error(progress: float) -> None:
 def test_non_int_strip_len_raises_type_error() -> None:
     with pytest.raises(TypeError, match=TYPE_ERROR_MSG):
         project_bar(strip_len=float(STRIP_LEN), progress=0.5, side="left")  # type: ignore[arg-type]
+
+
+def test_build_led_frame_projects_note_bars_across_strip() -> None:
+    frame = build_led_frame(
+        strip_len=STRIP_LEN,
+        travel_time_ms=1000,
+        progress_ms=500,
+        left_hit_times=[1000],
+        right_hit_times=[1000],
+        input_events=[],
+        input_pulses=[],
+    )
+
+    lit_indexes = [index for index, pixel in enumerate(frame.pixels) if any(pixel)]
+    assert min(lit_indexes) < CENTER_LEFT_INDEX
+    assert max(lit_indexes) > CENTER_RIGHT_INDEX
+
+
+def test_build_led_frame_hides_note_bar_once_hit_time_is_reached() -> None:
+    frame = build_led_frame(
+        strip_len=STRIP_LEN,
+        travel_time_ms=1000,
+        progress_ms=1000,
+        left_hit_times=[1000],
+        right_hit_times=[1000],
+        input_events=[],
+        input_pulses=[],
+    )
+
+    assert not any(any(pixel) for pixel in frame.pixels)
+
+
+def test_build_led_frame_overlays_input_pulses_near_center() -> None:
+    frame = build_led_frame(
+        strip_len=STRIP_LEN,
+        travel_time_ms=1000,
+        progress_ms=200,
+        left_hit_times=[],
+        right_hit_times=[],
+        input_events=[LaneInputEvent(lane="left", source="web", progress_ms=200)],
+        input_pulses=[InputPulse(lane="left", started_ms=150)],
+    )
+
+    assert frame.levels[0] > 0
+    center_pixels = frame.pixels[CENTER_LEFT_INDEX - 2 : CENTER_LEFT_INDEX + 1]
+    assert any(any(pixel) for pixel in center_pixels)

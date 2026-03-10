@@ -4,7 +4,7 @@ import pytest
 from playwright.sync_api import Error, sync_playwright
 
 
-def test_led_beat_feedback_marks_hits_and_misses() -> None:
+def test_game_start_sends_start_session_before_audio_playback() -> None:
     game_js_path = Path(__file__).resolve().parents[1] / "web" / "game.js"
 
     with sync_playwright() as playwright:
@@ -27,29 +27,13 @@ def test_led_beat_feedback_marks_hits_and_misses() -> None:
     <button id="btn-toggle-debug" type="button">Hide overlay</button>
     <div id="waveform"></div>
     <div id="game-spectral-waveform-scroll" style="width: 960px; overflow-x: auto;">
-      <canvas
-        id="game-spectral-waveform"
-        width="960"
-        height="88"
-        style="width: 960px; height: 88px;"
-      ></canvas>
+      <canvas id="game-spectral-waveform" width="960" height="88"></canvas>
       <div class="zoom-beat-grid-wrap">
         <div id="game-zoom-beat-grid"></div>
       </div>
     </div>
-    <canvas
-      id="game-spectral-waveform-overview"
-      width="960"
-      height="72"
-      style="width: 960px; height: 72px;"
-    ></canvas>
-    <canvas
-      id="visualizer"
-      width="960"
-      height="70"
-      style="width: 960px; height: 70px;"
-    ></canvas>
-    <div id="led-beat-feedback"></div>
+    <canvas id="game-spectral-waveform-overview" width="960" height="72"></canvas>
+    <canvas id="visualizer" width="960" height="70"></canvas>
     <dd id="game-current-time"></dd>
     <dd id="game-track-length"></dd>
     <dd id="debug-remaining-time"></dd>
@@ -69,7 +53,7 @@ def test_led_beat_feedback_marks_hits_and_misses() -> None:
   class MockWaveSurfer {
     constructor() {
       this._events = new Map();
-      this._duration = 2.4;
+      this._duration = 180;
     }
 
     on(eventName, callback) {
@@ -90,10 +74,24 @@ def test_led_beat_feedback_marks_hits_and_misses() -> None:
 
     constructor() {
       this.readyState = MockWebSocket.OPEN;
-      setTimeout(() => this.onopen?.(), 0);
+      this.sent = [];
+      window.__mockSocket = this;
+      setTimeout(() => {
+        this.onopen?.();
+        this.onmessage?.({
+          data: JSON.stringify({
+            type: 'session_state',
+            state: 'idle',
+            session_id: 'default-session'
+          })
+        });
+      }, 0);
     }
 
-    send(_) {}
+    send(payload) {
+      this.sent.push(JSON.parse(payload));
+    }
+
     close() {}
   }
 
@@ -121,7 +119,7 @@ def test_led_beat_feedback_marks_hits_and_misses() -> None:
         stopOverviewDrag() {},
         stopScrollDrag() {},
         updateVisibleWindowRatios() {
-          return { start: 0, end: 1 };
+          return { start: 0, end: 0.25 };
         }
       };
     }
@@ -136,80 +134,83 @@ def test_led_beat_feedback_marks_hits_and_misses() -> None:
     if (String(url).endsWith('/api/songs')) {
       return {
         ok: true,
-        json: async () => ['feedback-song']
+        json: async () => ['sync-song']
       };
     }
 
     return {
       ok: true,
       json: async () => ({
-        song_id: 'feedback-song',
+        song_id: 'sync-song',
         travel_time_ms: 1200,
-        global_offset_ms: 0,
         judgement_windows_ms: { perfect: 50, good: 100 },
-        left: [1000],
-        right: [1500],
+        left: [1200],
+        right: [],
         audio_analysis: {
-          duration_ms: 2400,
-          beat_times_ms: [1000, 1500],
+          beat_times_ms: [0, 600, 1200, 1800],
           beat_descriptors: []
         }
       })
     };
   };
 
-  window.__audioCurrentTimeSeconds = 0;
-  const audio = document.getElementById('song-audio');
-  Object.defineProperty(audio, 'currentTime', {
+  const audioProto = window.HTMLMediaElement.prototype;
+  Object.defineProperty(audioProto, 'currentTime', {
     configurable: true,
     get() {
-      return window.__audioCurrentTimeSeconds;
+      return this.__currentTime || 0;
     },
     set(value) {
-      window.__audioCurrentTimeSeconds = value;
+      this.__currentTime = value;
     }
   });
-  Object.defineProperty(audio, 'duration', {
+  Object.defineProperty(audioProto, 'muted', {
     configurable: true,
     get() {
-      return 2.4;
+      return this.__muted || false;
+    },
+    set(value) {
+      this.__muted = value;
     }
   });
-  audio.pause = function pause() {};
-  audio.play = async function play() {};
+  audioProto.load = function load() {};
+  audioProto.pause = function pause() {};
+  audioProto.play = async function play() {
+    window.__playCalls = window.__playCalls || [];
+    window.__playCalls.push({
+      currentTime: this.currentTime,
+      src: this.src,
+    });
+  };
 })();
 """,
         )
         page.add_script_tag(path=str(game_js_path))
-        results = page.evaluate(
+        result = page.evaluate(
             """async () => {
           document.dispatchEvent(new Event('DOMContentLoaded'));
-          await new Promise((resolve) => setTimeout(resolve, 20));
+          await new Promise((resolve) => setTimeout(resolve, 50));
+
           const select = document.getElementById('song-select');
-          select.value = 'feedback-song';
+          select.value = 'sync-song';
           select.dispatchEvent(new Event('change'));
-          await new Promise((resolve) => setTimeout(resolve, 80));
+          await new Promise((resolve) => setTimeout(resolve, 50));
 
-          window.__audioCurrentTimeSeconds = 1;
-          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
-          await new Promise((resolve) => setTimeout(resolve, 20));
+          document.getElementById('btn-start').click();
+          await new Promise((resolve) => setTimeout(resolve, 50));
 
-          const leftMarkerClass = document.querySelector(
-            '.led-beat-feedback-row[data-lane=\"left\"] .led-beat-feedback-marker'
-          ).className;
+          const sendsAfterClick = window.__mockSocket.sent.slice();
+          const playsAfterClick = (window.__playCalls || []).slice();
 
-          window.__audioCurrentTimeSeconds = 1.7;
-          document.getElementById('song-audio').dispatchEvent(new Event('timeupdate'));
-          await new Promise((resolve) => setTimeout(resolve, 20));
-
-          const rightMarkerClass = document.querySelector(
-            '.led-beat-feedback-row[data-lane=\"right\"] .led-beat-feedback-marker'
-          ).className;
-
-          return { leftMarkerClass, rightMarkerClass };
+          return {
+            sendsAfterClick,
+            playsAfterClick,
+          };
         }""",
         )
         browser.close()
 
-    assert "perfect" in results["leftMarkerClass"]
-    assert "miss" in results["rightMarkerClass"]
+    assert result["sendsAfterClick"] == [
+        {"type": "start_session", "song_id": "sync-song"},
+    ]
+    assert result["playsAfterClick"] == []

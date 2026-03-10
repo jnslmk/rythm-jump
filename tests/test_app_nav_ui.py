@@ -25,7 +25,9 @@ def test_primary_nav_renders_without_background_shell() -> None:
       <nav class="app-nav" aria-label="Primary">
         <menu class="buttons app-nav-menu">
           <li><a href="index.html" class="button accent-button active">Game</a></li>
-          <li><a href="manage.html" class="button ghost ghost-button">Manage Songs</a></li>
+          <li>
+            <a href="manage.html" class="button ghost ghost-button">Manage Songs</a>
+          </li>
         </menu>
       </nav>
     </header>
