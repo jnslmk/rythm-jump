@@ -17,13 +17,35 @@ test('right lane reaches the last LED at full progress', () => {
 });
 
 test('zero progress starts on the center-adjacent LEDs', () => {
-  assert.equal(projectBarHeadIndex(70, 0, 'left'), 34);
-  assert.equal(projectBarHeadIndex(70, 0, 'right'), 35);
+  assert.equal(projectBarHeadIndex(70, 0, 'left'), 31);
+  assert.equal(projectBarHeadIndex(70, 0, 'right'), 38);
 });
 
 test('progress is clipped before projection', () => {
-  assert.equal(projectBarHeadIndex(70, -1, 'left'), 34);
+  assert.equal(projectBarHeadIndex(70, -1, 'left'), 31);
   assert.equal(projectBarHeadIndex(70, 2, 'right'), 69);
+});
+
+test('left bar reaches the outer edge only at the end of travel', () => {
+  assert.deepEqual(getRenderedBarRange(70, 0, 'left', 4), {
+    startIndex: 31,
+    endIndex: 34,
+  });
+  assert.deepEqual(getRenderedBarRange(70, 0.99, 'left', 4), {
+    startIndex: 0,
+    endIndex: 3,
+  });
+});
+
+test('right bar reaches the outer edge only at the end of travel', () => {
+  assert.deepEqual(getRenderedBarRange(70, 0, 'right', 4), {
+    startIndex: 35,
+    endIndex: 38,
+  });
+  assert.deepEqual(getRenderedBarRange(70, 0.99, 'right', 4), {
+    startIndex: 66,
+    endIndex: 69,
+  });
 });
 
 test('completed bars no longer leave an edge pixel lit', () => {

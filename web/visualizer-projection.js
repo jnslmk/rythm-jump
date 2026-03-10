@@ -36,11 +36,13 @@
 
     const half = stripLen / 2;
     const clippedProgress = Math.min(Math.max(progress, 0), 1);
+    const span = 4;
+    const maxOffset = Math.max(half - span, 0);
 
     if (side === 'left') {
-      return Math.round((half - 1) * (1 - clippedProgress));
+      return Math.round(maxOffset * (1 - clippedProgress));
     }
-    return half + Math.round((half - 1) * clippedProgress);
+    return (stripLen - 1) - Math.round(maxOffset * (1 - clippedProgress));
   }
 
   function getRenderedBarRange(stripLen, progress, side, span) {
@@ -58,14 +60,14 @@
     const headIndex = projectBarHeadIndex(stripLen, progress, side);
     if (side === 'left') {
       return {
-        startIndex: Math.max(0, headIndex - span + 1),
-        endIndex: Math.min(stripLen - 1, headIndex),
+        startIndex: Math.max(0, headIndex),
+        endIndex: Math.min(stripLen - 1, headIndex + span - 1),
       };
     }
 
     return {
-      startIndex: Math.min(stripLen - 1, headIndex),
-      endIndex: Math.min(stripLen - 1, headIndex + span - 1),
+      startIndex: Math.max(0, headIndex - span + 1),
+      endIndex: Math.min(stripLen - 1, headIndex),
     };
   }
 

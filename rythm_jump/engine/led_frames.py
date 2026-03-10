@@ -50,7 +50,7 @@ class LedFrame:
 
 
 def project_bar(strip_len: int, progress: float, side: Side) -> int:
-    """Project progress along a strip onto the LED indexes for the requested side."""
+    """Project progress to the leading edge index for the requested lane bar."""
     if type(strip_len) is not int:
         message = "strip_len must be an int"
         raise TypeError(message)
@@ -69,10 +69,11 @@ def project_bar(strip_len: int, progress: float, side: Side) -> int:
 
     half = strip_len // 2
     clipped_progress = min(max(progress, 0.0), 1.0)
+    max_offset = max(half - _BAR_SPAN, 0)
 
     if side == "left":
-        return round((half - 1) * (1.0 - clipped_progress))
-    return half + round((half - 1) * clipped_progress)
+        return round(max_offset * (1.0 - clipped_progress))
+    return (strip_len - 1) - round(max_offset * (1.0 - clipped_progress))
 
 
 def build_led_frame(  # noqa: PLR0913
@@ -176,11 +177,11 @@ def _blend_span(
     color: RgbPixel,
 ) -> None:
     if lane == "left":
-        start = max(center_index - _BAR_SPAN + 1, 0)
-        end = center_index
-    else:
-        start = center_index
+        start = max(center_index, 0)
         end = min(center_index + _BAR_SPAN - 1, len(pixels) - 1)
+    else:
+        end = min(center_index, len(pixels) - 1)
+        start = max(end - _BAR_SPAN + 1, 0)
 
     for index in range(start, end + 1):
         _blend_pixel(pixels[index], color, intensity=1.0)

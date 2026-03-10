@@ -8,6 +8,8 @@ HALF_STRIP_LEN = STRIP_LEN // 2
 MAX_LED_INDEX = STRIP_LEN - 1
 CENTER_LEFT_INDEX = HALF_STRIP_LEN - 1
 CENTER_RIGHT_INDEX = HALF_STRIP_LEN
+LEFT_BAR_START_INDEX = HALF_STRIP_LEN - 4
+RIGHT_BAR_END_INDEX = HALF_STRIP_LEN + 3
 TOO_SHORT_STRIP_LENS = [0, 1]
 ODD_STRIP_LEN = 119
 
@@ -28,18 +30,19 @@ def test_right_progress_full_maps_to_end_of_strip() -> None:
 
 def test_progress_zero_maps_to_center_adjacent_origins() -> None:
     assert (
-        project_bar(strip_len=STRIP_LEN, progress=0.0, side="left") == CENTER_LEFT_INDEX
+        project_bar(strip_len=STRIP_LEN, progress=0.0, side="left")
+        == LEFT_BAR_START_INDEX
     )
     assert (
         project_bar(strip_len=STRIP_LEN, progress=0.0, side="right")
-        == CENTER_RIGHT_INDEX
+        == RIGHT_BAR_END_INDEX
     )
 
 
 def test_progress_is_clipped_to_range_zero_to_one() -> None:
     assert (
         project_bar(strip_len=STRIP_LEN, progress=-1.0, side="left")
-        == CENTER_LEFT_INDEX
+        == LEFT_BAR_START_INDEX
     )
     assert project_bar(strip_len=STRIP_LEN, progress=2.0, side="right") == MAX_LED_INDEX
 
@@ -90,6 +93,34 @@ def test_build_led_frame_projects_note_bars_across_strip() -> None:
     lit_indexes = [index for index, pixel in enumerate(frame.pixels) if any(pixel)]
     assert min(lit_indexes) < CENTER_LEFT_INDEX
     assert max(lit_indexes) > CENTER_RIGHT_INDEX
+
+
+def test_build_led_frame_keeps_left_bar_off_outer_edge_before_hit() -> None:
+    frame = build_led_frame(
+        strip_len=STRIP_LEN,
+        travel_time_ms=1000,
+        progress_ms=900,
+        left_hit_times=[1000],
+        right_hit_times=[],
+        input_events=[],
+        input_pulses=[],
+    )
+
+    assert not any(any(pixel) for pixel in frame.pixels[:3])
+
+
+def test_build_led_frame_touches_outer_edge_just_before_hit() -> None:
+    frame = build_led_frame(
+        strip_len=STRIP_LEN,
+        travel_time_ms=1000,
+        progress_ms=999,
+        left_hit_times=[1000],
+        right_hit_times=[],
+        input_events=[],
+        input_pulses=[],
+    )
+
+    assert any(frame.pixels[0])
 
 
 def test_build_led_frame_hides_note_bar_once_hit_time_is_reached() -> None:
