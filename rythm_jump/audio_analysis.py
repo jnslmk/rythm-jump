@@ -14,6 +14,7 @@ from rythm_jump.models.chart import (
     Chart,
     SpectralBandEnergy,
 )
+from rythm_jump.presentation import dominant_band_color
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,14 +77,6 @@ def _normalize_series_to_unit(series: np.ndarray) -> np.ndarray:
     if max_value <= 0:
         return np.zeros_like(series, dtype=np.float64)
     return np.clip(series / max_value, 0.0, 1.0)
-
-
-def _dominant_band_color(dominant_band: str) -> str:
-    return {
-        "low": "#60a5fa",
-        "mid": "#2dd4bf",
-        "high": "#f472b6",
-    }[dominant_band]
 
 
 def _normalize_feature(values: np.ndarray) -> np.ndarray:
@@ -420,7 +413,7 @@ def analyze_audio_with_librosa(audio_path: Path) -> AudioAnalysis:  # noqa: PLR0
                     high=float(normalized_energy[2]),
                 ),
                 dominant_band=dominant_band,
-                color_hint=_dominant_band_color(dominant_band),
+                color_hint=dominant_band_color(dominant_band),
             ),
         )
 

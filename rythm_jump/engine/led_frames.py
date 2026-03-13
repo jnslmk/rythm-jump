@@ -6,6 +6,13 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from rythm_jump.presentation import (
+    LEFT_BAR_RGB,
+    LEFT_PULSE_RGB,
+    RIGHT_BAR_RGB,
+    RIGHT_PULSE_RGB,
+)
+
 if TYPE_CHECKING:
     from rythm_jump.engine.types import Lane
 
@@ -17,10 +24,10 @@ _VALID_SIDES = ("left", "right")
 _MIN_STRIP_LEN = 2
 _BAR_SPAN = 4
 _INPUT_PULSE_MS = 180
-_LEFT_BAR_COLOR: RgbPixel = (90, 210, 255)
-_RIGHT_BAR_COLOR: RgbPixel = (255, 105, 160)
-_LEFT_PULSE_COLOR: RgbPixel = (190, 245, 255)
-_RIGHT_PULSE_COLOR: RgbPixel = (255, 210, 225)
+_LEFT_BAR_COLOR: RgbPixel = LEFT_BAR_RGB
+_RIGHT_BAR_COLOR: RgbPixel = RIGHT_BAR_RGB
+_LEFT_PULSE_COLOR: RgbPixel = LEFT_PULSE_RGB
+_RIGHT_PULSE_COLOR: RgbPixel = RIGHT_PULSE_RGB
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,8 @@
 (function initSpectralWaveform(global) {
+  const theme = global.RhythmJumpTheme || {};
+  const waveformColors = theme.colors?.waveform || {};
   const MIN_SPECTRAL_RMS = 0.001;
-  const DEFAULT_BAND_LAYERS = [
+  const DEFAULT_BAND_LAYERS = theme.colors?.spectralBands || [
     { alpha: 0.78, color: 'rgba(249, 115, 22, 0.72)', gain: 1.15 },
     { alpha: 0.78, color: 'rgba(16, 185, 129, 0.72)', gain: 1.0 },
     { alpha: 0.82, color: 'rgba(14, 165, 233, 0.74)', gain: 1.25 }
@@ -83,7 +85,9 @@
       const beatMs = Number(beatTimesMs[i]) || 0;
       const x = (beatMs / durationMs) * width;
       const barStart = isBarStart(i, beatMs);
-      ctx.strokeStyle = barStart ? 'rgba(246, 208, 63, 0.95)' : 'rgba(45, 212, 191, 0.6)';
+      ctx.strokeStyle = barStart
+        ? (waveformColors.barBeat || 'rgba(246, 208, 63, 0.95)')
+        : (waveformColors.beat || 'rgba(45, 212, 191, 0.6)');
       ctx.lineWidth = barStart ? 2 : 1;
       ctx.beginPath();
       ctx.moveTo(x, 2);
@@ -96,7 +100,7 @@
     if (!Array.isArray(barBeats) || barBeats.length === 0 || durationMs <= 0) {
       return;
     }
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.9)';
+    ctx.fillStyle = waveformColors.label || 'rgba(248, 250, 252, 0.9)';
     ctx.font = "10px 'Space Grotesk', sans-serif";
     for (const barBeat of barBeats) {
       const timeMs = Number(barBeat?.timeMs) || 0;
@@ -111,14 +115,14 @@
     const labelY = height - 4;
     const tickCount = 8;
 
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+    ctx.strokeStyle = waveformColors.axis || 'rgba(148, 163, 184, 0.45)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, axisY);
     ctx.lineTo(width, axisY);
     ctx.stroke();
 
-    ctx.fillStyle = 'rgba(203, 213, 225, 0.9)';
+    ctx.fillStyle = waveformColors.axisLabel || 'rgba(203, 213, 225, 0.9)';
     ctx.font = "10px 'Space Grotesk', sans-serif";
     for (let i = 0; i <= tickCount; i += 1) {
       const ratio = i / tickCount;
@@ -139,17 +143,17 @@
       const highlightX = startRatio * width;
       const highlightW = Math.max(1, (endRatio - startRatio) * width);
       ctx.globalAlpha = 0.16;
-      ctx.fillStyle = '#f8fafc';
+      ctx.fillStyle = waveformColors.windowFill || '#f8fafc';
       ctx.fillRect(highlightX, 0, highlightW, axisY);
       ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
+      ctx.strokeStyle = waveformColors.progressLineSoft || 'rgba(248, 250, 252, 0.95)';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(highlightX, 0.75, highlightW, Math.max(axisY - 1.5, 1));
     }
 
     const progressX = Math.max(0, Math.min((progressMs / durationMs) * width, width));
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = '#f8fafc';
+    ctx.strokeStyle = waveformColors.progressLine || '#f8fafc';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(progressX, 0);
@@ -177,7 +181,7 @@
     }
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#020617';
+    ctx.fillStyle = waveformColors.background || '#020617';
     ctx.fillRect(0, 0, width, height);
 
     const durationMs = Math.max(Number(config.durationMs) || 0, 1);
@@ -222,7 +226,7 @@
         const timeMs = Number(descriptor.time_ms) || 0;
         const x = (timeMs / durationMs) * width;
         const amplitude = Math.max((Number(descriptor.rms) || 0) / rmsMax, 0) * maxAmplitude;
-        ctx.strokeStyle = descriptor.color_hint || '#22d3ee';
+        ctx.strokeStyle = descriptor.color_hint || waveformColors.descriptorFallback || '#22d3ee';
         ctx.globalAlpha = 0.82;
         ctx.beginPath();
         ctx.moveTo(x, centerY - amplitude);
@@ -230,7 +234,7 @@
         ctx.stroke();
       }
     } else if (!hasDetailedWaveform) {
-      ctx.fillStyle = 'rgba(156, 163, 175, 0.9)';
+      ctx.fillStyle = waveformColors.empty || 'rgba(156, 163, 175, 0.9)';
       ctx.font = "12px 'Space Grotesk', sans-serif";
       ctx.fillText(config.emptyMessage || 'Waveform data unavailable.', 16, 24);
       return;
