@@ -12,7 +12,7 @@
     />
     <link rel="stylesheet" href="vendor/oat.min.css" />
     <link rel="stylesheet" href="style.css" />
-    <!-- WaveSurfer for waveform visualizer -->
+    <script src="theme.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -21,20 +21,22 @@
   <body class="rhythm-app">
     <header class="app-header">
       <nav class="app-nav" aria-label="Primary">
-        <menu class="buttons app-nav-menu">
+        <ul class="buttons app-nav-menu" role="list">
           <li><a href="index.html" class="button ghost ghost-button">Game</a></li>
           <li><a href="manage.html" class="button accent-button active" aria-current="page">Manage Songs</a></li>
-        </menu>
+        </ul>
       </nav>
     </header>
     <main>
-      <header class="page-header">
-        <h1>Song Management</h1>
-      </header>
+      <h1 class="page-title">Song Management</h1>
       
-      <section id="upload-song" class="surface surface-plain">
+      <section
+        id="upload-song"
+        class="surface surface-plain"
+        aria-labelledby="upload-song-title"
+      >
         <header class="section-header">
-          <h2>Add New Song</h2>
+          <h2 id="upload-song-title">Add New Song</h2>
         </header>
         <div class="song-source-tabs" role="tablist" aria-label="Song import methods">
           <button
@@ -43,6 +45,7 @@
             class="song-source-tab active"
             data-mode="upload"
             aria-selected="true"
+            aria-controls="song-source-upload"
           >
             Upload File
           </button>
@@ -52,17 +55,23 @@
             class="song-source-tab"
             data-mode="download"
             aria-selected="false"
+            aria-controls="song-source-download"
           >
             Download URL
           </button>
         </div>
-        <div id="song-source-upload" class="song-source-panel">
+        <div
+          id="song-source-upload"
+          class="song-source-panel"
+          role="tabpanel"
+          aria-labelledby="tab-upload-song"
+        >
           <form id="upload-form" class="flex-gap">
-            <label>
+            <label for="new-song-id">
               <span class="label">Song ID</span>
               <input id="new-song-id" type="text" placeholder="my-awesome-song" required class="input-control" />
             </label>
-            <label>
+            <label for="new-song-audio">
               <span class="label">Audio File</span>
               <input id="new-song-audio" type="file" accept="audio/*" required class="input-control" />
             </label>
@@ -70,13 +79,19 @@
             <output id="upload-status" role="status" aria-live="polite"></output>
           </form>
         </div>
-        <div id="song-source-download" class="song-source-panel hidden" aria-hidden="true">
+        <div
+          id="song-source-download"
+          class="song-source-panel hidden"
+          role="tabpanel"
+          aria-hidden="true"
+          aria-labelledby="tab-download-song"
+        >
           <form id="download-form" class="flex-gap">
-            <label>
+            <label for="download-song-id">
               <span class="label">Song ID</span>
               <input id="download-song-id" type="text" placeholder="soundcloud-import" required class="input-control" />
             </label>
-            <label class="song-download-url-field">
+            <label class="song-download-url-field" for="download-song-url">
               <span class="label">Source URL</span>
               <input id="download-song-url" type="url" placeholder="https://soundcloud.com/..." required class="input-control" />
             </label>
@@ -87,20 +102,24 @@
         </div>
       </section>
 
-      <section id="edit-song" class="surface surface-plain">
+      <section
+        id="edit-song"
+        class="surface surface-plain"
+        aria-labelledby="edit-song-title"
+      >
         <header class="section-header">
-          <h2>Select Song to Edit</h2>
+          <h2 id="edit-song-title">Select Song to Edit</h2>
         </header>
         <div class="controls flex-gap edit-song-controls">
-          <label class="song-select-field">
+          <label class="song-select-field" for="song-edit-select">
             <span class="label">Song</span>
-            <select id="song-edit-select" aria-label="Select Song to Edit" class="input-control">
+            <select id="song-edit-select" class="input-control">
               <option value="">Loading songs...</option>
             </select>
           </label>
-          <menu class="buttons controls-menu" aria-label="Chart actions">
-            <li><button id="btn-save-chart" class="accent-button">Save Chart</button></li>
-          </menu>
+          <ul class="buttons controls-menu" aria-label="Chart actions" role="list">
+            <li><button id="btn-save-chart" type="button" class="accent-button">Save Chart</button></li>
+          </ul>
           <output id="save-status" role="status" aria-live="polite"></output>
         </div>
       </section>
@@ -142,35 +161,36 @@
             </div>
           </div>
           <div id="timeline"></div>
-          <menu class="editor-controls buttons" aria-label="Playback controls">
-            <li><button id="btn-play-pause" class="accent-button">Play</button></li>
+          <ul class="editor-controls buttons" aria-label="Playback controls" role="list">
+            <li><button id="btn-play-pause" type="button" class="accent-button">Play</button></li>
             <li><button id="btn-stop-playback" class="ghost ghost-button" type="button">Stop</button></li>
             <li class="editor-status-item"><output id="audio-time">0:00 / 0:00</output></li>
-          </menu>
+          </ul>
         </div>
 
         <div class="bpm-controls">
           <fieldset>
             <legend>BPM & Timing</legend>
             <div class="timing-input-row">
-              <label>
+              <label for="song-bpm">
                 <span class="label">BPM</span>
                 <input id="song-bpm" type="number" step="0.1" value="120" class="input-control" />
               </label>
-              <label>
+              <label for="global-offset">
                 <span class="label">Beat Grid Offset (ms)</span>
                 <input id="global-offset" type="number" value="0" class="input-control" />
               </label>
             </div>
-            <menu class="bpm-actions buttons" aria-label="Timing tools">
+            <ul class="bpm-actions buttons" aria-label="Timing tools" role="list">
               <li><button id="btn-tap-bpm" type="button" class="accent-button">Tap BPM</button></li>
               <li><button id="btn-auto-pattern" type="button" class="accent-button">Auto Pattern</button></li>
               <li><button id="btn-analyze-audio" type="button" class="ghost ghost-button">Analyze Song</button></li>
-            </menu>
+            </ul>
           </fieldset>
         </div>
       </section>
     </main>
+    <script src="shared-ui.js"></script>
     <script src="manage.js"></script>
   </body>
 </html>

@@ -1,4 +1,8 @@
 const apiBaseUrl = '/api';
+const theme = window.RhythmJumpTheme || {};
+const ui = window.RhythmJumpUi || {};
+const WAVE_SURFER_THEME = theme.waveSurfer || {};
+const WAVE_SURFER_COLORS = theme.colors?.waveform || {};
 const DEFAULT_SESSION_ID = 'default-session';
 const GAME_WAVEFORM_ZOOM_STORAGE_KEY = 'rhythmJumpGameWaveformZoom';
 const MAX_TIMELINE_ENTRIES = 12;
@@ -9,12 +13,13 @@ const GAME_NOTE_SNAP_MAX_MS = 180;
 const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
 const ACTIVE_BAR_SPAN = 4;
 const ACTIVE_BAR_FLASH_WINDOW_MS = 260;
-const ACTIVE_BAR_COLORS = {
+const ACTIVE_BAR_COLORS = theme.colors?.activeBars || {
   left: 'rgba(90, 210, 255, 0.9)',
   right: 'rgba(255, 105, 160, 0.9)',
   perfect: 'rgba(253, 224, 71, 0.98)',
   good: 'rgba(134, 239, 172, 0.96)',
-  miss: 'rgba(248, 113, 113, 0.96)'
+  miss: 'rgba(248, 113, 113, 0.96)',
+  fallback: '#f8fafc',
 };
 
 const KEY_MAPPING = {
@@ -77,6 +82,44 @@ let visualizerBackgroundCacheHeight = 0;
 let ledBeatFeedbackSignature = '';
 let ledBeatFeedbackMarkerRefs = { left: [], right: [] };
 
+function getElement(id) {
+  return ui.byId ? ui.byId(id) : document.getElementById(id);
+}
+
+async function requestJson(url, options, errorMessage) {
+  if (ui.fetchJson) {
+    return ui.fetchJson(url, options, errorMessage);
+  }
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(errorMessage || response.statusText || 'Request failed');
+  }
+  return response.json();
+}
+
+function populateSelectOptions(select, values, options = {}) {
+  if (ui.populateSelect) {
+    ui.populateSelect(select, values, options);
+    return;
+  }
+  if (!select) {
+    return;
+  }
+  const { placeholder = '', emptyLabel = placeholder } = options;
+  const fragment = document.createDocumentFragment();
+  const initialOption = document.createElement('option');
+  initialOption.value = '';
+  initialOption.textContent = values.length ? placeholder : emptyLabel;
+  fragment.appendChild(initialOption);
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    fragment.appendChild(option);
+  }
+  select.replaceChildren(fragment);
+}
+
 function isSessionPlaying() {
   return state.runStatus === 'playing';
 }
@@ -86,8 +129,8 @@ function isSessionPaused() {
 }
 
 function updateControlStates() {
-  const startBtn = document.getElementById('btn-start');
-  const stopBtn = document.getElementById('btn-stop');
+  const startBtn = getElement('btn-start');
+  const stopBtn = getElement('btn-stop');
   const playing = isSessionPlaying();
   const paused = isSessionPaused();
 
@@ -146,12 +189,12 @@ function initGameWaveform() {
 
   const config = {
     container: '#waveform',
-    waveColor: '#4f46e5',
-    progressColor: '#3b82f6',
-    cursorColor: '#f43f5e',
-    barWidth: 2,
-    barRadius: 3,
-    height: 120,
+    waveColor: WAVE_SURFER_COLORS.wave || '#4f46e5',
+    progressColor: WAVE_SURFER_COLORS.progress || '#3b82f6',
+    cursorColor: WAVE_SURFER_COLORS.cursor || '#f43f5e',
+    barWidth: WAVE_SURFER_THEME.barWidth || 2,
+    barRadius: WAVE_SURFER_THEME.barRadius || 3,
+    height: WAVE_SURFER_THEME.height?.game || 120,
     responsive: true
   };
 
@@ -304,9 +347,9 @@ function updateVisibleWaveformWindowRatios(scrollContainer) {
 function applyGameWaveformZoom(options = {}) {
   const preferExisting = options.preferExisting === true;
   ensureGameWaveformController();
-  const spectralWaveform = document.getElementById('game-spectral-waveform');
-  const beatGrid = document.getElementById('game-zoom-beat-grid');
-  const scrollContainer = document.getElementById('game-spectral-waveform-scroll');
+  const spectralWaveform = getElement('game-spectral-waveform');
+  const beatGrid = getElement('game-zoom-beat-grid');
+  const scrollContainer = getElement('game-spectral-waveform-scroll');
   if (!spectralWaveform) {
     return;
   }
@@ -473,7 +516,7 @@ function mapNotesToBeatSlotIndexes(noteTimesMs) {
 }
 
 function renderGameBeatGrid() {
-  const beatGrid = document.getElementById('game-zoom-beat-grid');
+  const beatGrid = getElement('game-zoom-beat-grid');
   if (!beatGrid) {
     return;
   }
@@ -498,7 +541,7 @@ function renderGameBeatGrid() {
   const clampedEnd = Math.max(clampedStart, Math.min(endIndex, state.gameBeatSlots.length - 1));
   const firstMs = state.gameBeatSlots[clampedStart]?.timeMs || 0;
   const contentWidthPx = Math.max(
-    document.getElementById('game-spectral-waveform')?.clientWidth || beatGrid.clientWidth || 0,
+    getElement('game-spectral-waveform')?.clientWidth || beatGrid.clientWidth || 0,
     1
   );
   const pxPerMs = contentWidthPx / durationMs;
@@ -950,7 +993,7 @@ function getActiveBarFlashAlpha(result, hitTimeMs, playbackMs) {
 }
 
 function getActiveBarColor(result, lane) {
-  return ACTIVE_BAR_COLORS[result] || ACTIVE_BAR_COLORS[lane] || '#f8fafc';
+  return ACTIVE_BAR_COLORS[result] || ACTIVE_BAR_COLORS[lane] || ACTIVE_BAR_COLORS.fallback || '#f8fafc';
 }
 
 function getActiveBarRange(bar, playbackMs, numLeds) {
@@ -1032,8 +1075,8 @@ function getVisualizerBackgroundCanvas(width, height, numLeds, ledWidth, ledY, l
 
   for (let i = 0; i < numLeds; i += 1) {
     backgroundCtx.fillStyle = i < numLeds / 2
-      ? 'rgba(59, 130, 246, 0.12)'
-      : 'rgba(236, 72, 153, 0.12)';
+      ? (theme.colors?.ledTrack?.left || 'rgba(59, 130, 246, 0.12)')
+      : (theme.colors?.ledTrack?.right || 'rgba(236, 72, 153, 0.12)');
     backgroundCtx.fillRect(10 + i * ledWidth, ledY, ledWidth - 2, ledHeight);
   }
 
@@ -1222,11 +1265,15 @@ function resetSessionState() {
 }
 
 function updateUI() {
-  const select = document.getElementById('song-select');
+  const select = getElement('song-select');
   if (select.options.length <= 1 && state.songs.length > 0) {
-    select.innerHTML = '<option value="">Select a song</option>' + 
-      state.songs.map(s => `<option value="${s}">${s}</option>`).join('');
-    select.value = state.songs[0];
+    populateSelectOptions(select, state.songs, {
+      placeholder: 'Select a song',
+      emptyLabel: 'No songs available',
+    });
+    if (!select.value && state.songs.length > 0) {
+      select.value = state.songs[0];
+    }
   }
   if (select.value) {
     state.songId = select.value;
@@ -1304,10 +1351,9 @@ function connectWebSocket() {
 
 async function fetchSongs() {
   try {
-    const response = await fetch(`${apiBaseUrl}/songs`);
-    state.songs = await response.json();
+    state.songs = await requestJson(`${apiBaseUrl}/songs`, {}, 'Failed to load songs');
     updateUI();
-    const select = document.getElementById('song-select');
+    const select = getElement('song-select');
     if (select?.value) {
       state.songId = select.value;
       await loadChart(select.value);
@@ -1322,13 +1368,12 @@ async function loadChart(songId) {
   if (state.chart?.song_id === songId) return;
 
   try {
-    const response = await fetch(
+    const chartData = await requestJson(
       `${apiBaseUrl}/charts/${encodeURIComponent(songId)}`
+      ,
+      {},
+      'Failed to load chart'
     );
-    if (!response.ok) {
-      throw new Error('failed to load chart');
-    }
-    const chartData = await response.json();
     state.chart = chartData;
     state.noteHitResults = createLaneNoteResults();
     invalidateLedBeatFeedbackCache();
@@ -1417,7 +1462,7 @@ async function startPendingAudioPlayback(progressMs = 0) {
 }
 
 function init() {
-  const startButton = document.getElementById('btn-start');
+  const startButton = getElement('btn-start');
   if (startButton) {
     startButton.addEventListener('click', async () => {
       if (isSessionPlaying()) {
@@ -1430,7 +1475,7 @@ function init() {
         return;
       }
 
-      const songId = document.getElementById('song-select').value;
+      const songId = getElement('song-select').value;
       if (!songId) return window.alert('Select a song first!');
       
       state.runStatus = 'Buffering';
@@ -1457,7 +1502,7 @@ function init() {
     });
   }
 
-  const stopButton = document.getElementById('btn-stop');
+  const stopButton = getElement('btn-stop');
   if (stopButton) {
     stopButton.addEventListener('click', () => {
       if (!isSessionPlaying() && !isSessionPaused()) return;
@@ -1465,7 +1510,7 @@ function init() {
     });
   }
 
-  document.getElementById('song-select').addEventListener('change', async (event) => {
+  getElement('song-select').addEventListener('change', async (event) => {
     const songId = event.target.value;
     state.songId = songId;
     await loadChart(songId);

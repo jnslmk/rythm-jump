@@ -12,6 +12,7 @@
     />
     <link rel="stylesheet" href="vendor/oat.min.css" />
     <link rel="stylesheet" href="style.css" />
+    <script src="theme.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
@@ -20,38 +21,44 @@
   <body class="rhythm-app">
     <header class="app-header">
       <nav class="app-nav" aria-label="Primary">
-        <menu class="buttons app-nav-menu">
+        <ul class="buttons app-nav-menu" role="list">
           <li><a href="index.html" class="button accent-button active" aria-current="page">Game</a></li>
           <li><a href="manage.html" class="button ghost ghost-button">Manage Songs</a></li>
-        </menu>
+        </ul>
       </nav>
     </header>
     <main>
-      <header class="page-header">
-        <h1>Rhythm Jump</h1>
-      </header>
+      <h1 class="page-title">Rhythm Jump</h1>
       
-      <section id="song-selection" class="surface surface-plain">
+      <section
+        id="song-selection"
+        class="surface surface-plain"
+        aria-labelledby="song-selection-title"
+      >
         <header class="section-header">
-          <h2>Choose Song</h2>
+          <h2 id="song-selection-title">Choose Song</h2>
         </header>
         <div class="controls flex-gap game-session-controls">
-          <label class="song-select-field">
+          <label class="song-select-field" for="song-select">
             <span class="label">Song</span>
-            <select id="song-select" aria-label="Select Song" class="input-control">
+            <select id="song-select" class="input-control">
               <option value="">Loading songs...</option>
             </select>
           </label>
-          <menu class="buttons controls-menu" aria-label="Session controls">
+          <ul class="buttons controls-menu" aria-label="Session controls" role="list">
             <li><button id="btn-start" type="button" class="accent-button">Start Game</button></li>
             <li><button id="btn-stop" type="button" class="ghost-button">Stop</button></li>
-          </menu>
+          </ul>
         </div>
       </section>
 
-      <section id="waveform-section" class="surface surface-plain">
+      <section
+        id="waveform-section"
+        class="surface surface-plain"
+        aria-labelledby="waveform-title"
+      >
         <header class="section-header">
-          <h2>Waveform</h2>
+          <h2 id="waveform-title">Waveform</h2>
         </header>
         <div id="waveform-container">
           <div id="waveform"></div>
@@ -90,9 +97,13 @@
         </div>
       </section>
 
-      <section id="visualization" class="surface surface-plain">
+      <section
+        id="visualization"
+        class="surface surface-plain"
+        aria-labelledby="visualization-title"
+      >
         <header class="section-header">
-          <h2>LED Preview</h2>
+          <h2 id="visualization-title">LED Preview</h2>
         </header>
         <canvas
           id="visualizer"
@@ -125,6 +136,7 @@
       </section>
     </main>
     <audio id="song-audio" preload="auto" hidden></audio>
+    <script src="shared-ui.js"></script>
     <script src="visualizer-projection.js"></script>
     <script src="game.js"></script>
   </body>

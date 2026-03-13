@@ -1,10 +1,17 @@
 const apiBaseUrl = '/api';
+const theme = window.RhythmJumpTheme || {};
+const ui = window.RhythmJumpUi || {};
+const WAVE_SURFER_THEME = theme.waveSurfer || {};
+const WAVE_SURFER_COLORS = theme.colors?.waveform || {};
+const REGION_COLORS = theme.colors?.region || {};
 const MANAGE_SELECTED_SONG_KEY = 'manage:selectedSongId';
 const MIN_SPECTRAL_RMS = window.SpectralWaveform?.MIN_SPECTRAL_RMS || 0.001;
 const WAVEFORM_ZOOM_MIN = 1;
 const MAX_VISIBLE_BEATS = 16;
 const SUBDIVISIONS_PER_BEAT = 2;
 const BEAT_GRID_OVERSCAN_SUBDIVISIONS = 96;
+const CHART_TRAVEL_TIME_MS = 1200;
+const DEFAULT_JUDGEMENT_WINDOWS_MS = Object.freeze({ perfect: 50, good: 100 });
 
 let wavesurfer = null;
 let wsRegions = null;
@@ -33,6 +40,10 @@ let state = {
   chartBaselineSignature: '',
   hasUnsavedChartChanges: false
 };
+
+function getElement(id) {
+  return ui.byId ? ui.byId(id) : document.getElementById(id);
+}
 
 function sortObjectKeys(value) {
   if (Array.isArray(value)) {
@@ -64,18 +75,105 @@ function normalizeTimingArray(values) {
 }
 
 function buildCurrentChartPayload() {
-  const bpmInput = document.getElementById('song-bpm');
-  const offsetInput = document.getElementById('global-offset');
+  const bpmInput = getElement('song-bpm');
+  const offsetInput = getElement('global-offset');
   return {
     song_id: currentSongId,
-    travel_time_ms: 1200, // Should probably be configurable per song
+    travel_time_ms: CHART_TRAVEL_TIME_MS,
     global_offset_ms: Math.round(normalizeNumber(offsetInput?.value, state.offset)),
-    judgement_windows_ms: { perfect: 50, good: 100 },
+    judgement_windows_ms: DEFAULT_JUDGEMENT_WINDOWS_MS,
     left: normalizeTimingArray(state.left),
     right: normalizeTimingArray(state.right),
     bpm: normalizeNumber(bpmInput?.value, state.bpm),
     audio_analysis: state.audioAnalysis || null
   };
+}
+
+function setStatusMessage(id, message, options) {
+  if (ui.setStatus) {
+    ui.setStatus(id, message, options);
+    return;
+  }
+  const element = getElement(id);
+  if (element) {
+    element.textContent = message;
+  }
+}
+
+function populateSelectOptions(select, values, options = {}) {
+  if (ui.populateSelect) {
+    ui.populateSelect(select, values, options);
+    return;
+  }
+  if (!select) {
+    return;
+  }
+  const { placeholder = '', emptyLabel = placeholder } = options;
+  const fragment = document.createDocumentFragment();
+  const initialOption = document.createElement('option');
+  initialOption.value = '';
+  initialOption.textContent = values.length ? placeholder : emptyLabel;
+  fragment.appendChild(initialOption);
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    fragment.appendChild(option);
+  }
+  select.replaceChildren(fragment);
+}
+
+function setSectionHidden(id, hidden) {
+  if (ui.setHidden) {
+    ui.setHidden(id, hidden);
+    return;
+  }
+  const element = typeof id === 'string' ? getElement(id) : id;
+  if (!element) {
+    return;
+  }
+  element.classList.toggle('hidden', hidden);
+  element.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+}
+
+function updateAnalysisDerivedState(analysis) {
+  state.audioAnalysis = analysis || null;
+  const descriptors = state.audioAnalysis?.beat_descriptors;
+  if (Array.isArray(descriptors) && descriptors.length > 0) {
+    state.spectralRmsMax = Math.max(
+      ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
+      MIN_SPECTRAL_RMS
+    );
+    return;
+  }
+  state.spectralRmsMax = 1;
+}
+
+async function requestJson(url, options, errorMessage) {
+  if (ui.fetchJson) {
+    return ui.fetchJson(url, options, errorMessage);
+  }
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(errorMessage || response.statusText || 'Request failed');
+  }
+  return response.json();
+}
+
+async function runWithDisabled(control, task) {
+  if (ui.withDisabled) {
+    return ui.withDisabled(control, task);
+  }
+  if (control) {
+    control.disabled = true;
+  }
+  try {
+    return await task();
+  } finally {
+    if (control) {
+      control.disabled = false;
+    }
+  }
 }
 
 function refreshChartDirtyState() {
@@ -92,25 +190,23 @@ function refreshChartDirtyState() {
 function setSongSourceMode(mode) {
   const normalizedMode = mode === 'download' ? 'download' : 'upload';
   const panels = {
-    upload: document.getElementById('song-source-upload'),
-    download: document.getElementById('song-source-download')
+    upload: getElement('song-source-upload'),
+    download: getElement('song-source-download')
   };
   const tabs = {
-    upload: document.getElementById('tab-upload-song'),
-    download: document.getElementById('tab-download-song')
+    upload: getElement('tab-upload-song'),
+    download: getElement('tab-download-song')
   };
 
   for (const entry of ['upload', 'download']) {
     const panel = panels[entry];
     const tab = tabs[entry];
     const isActive = entry === normalizedMode;
-    if (panel) {
-      panel.classList.toggle('hidden', !isActive);
-      panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-    }
+    setSectionHidden(panel, !isActive);
     if (tab) {
       tab.classList.toggle('active', isActive);
       tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tab.setAttribute('tabindex', isActive ? '0' : '-1');
     }
   }
 }
@@ -526,11 +622,12 @@ function scheduleManageOverviewWaveformRender(progressMs = 0) {
 }
 
 async function fetchSongs() {
-  const response = await fetch(`${apiBaseUrl}/songs`);
-  state.songs = await response.json();
-  const select = document.getElementById('song-edit-select');
-  select.innerHTML = '<option value="">Select a song to edit</option>' + 
-    state.songs.map(s => `<option value="${s}">${s}</option>`).join('');
+  state.songs = await requestJson(`${apiBaseUrl}/songs`, {}, 'Failed to load songs');
+  const select = getElement('song-edit-select');
+  populateSelectOptions(select, state.songs, {
+    placeholder: 'Select a song to edit',
+    emptyLabel: 'No songs available',
+  });
 
   const persistedSongId = window.localStorage.getItem(MANAGE_SELECTED_SONG_KEY) || '';
   if (persistedSongId && state.songs.includes(persistedSongId)) {
@@ -548,26 +645,20 @@ async function loadSong(songId) {
   state.chartBaselineSignature = '';
   state.hasUnsavedChartChanges = false;
   updateControlStates();
-  const response = await fetch(`${apiBaseUrl}/charts/${encodeURIComponent(songId)}`);
-  const chart = await response.json();
+  const chart = await requestJson(
+    `${apiBaseUrl}/charts/${encodeURIComponent(songId)}`,
+    {},
+    'Failed to load chart'
+  );
   
   state.bpm = chart.bpm || 120; // Default if not in chart
   state.offset = chart.global_offset_ms || 0;
   state.left = (chart.left || []).slice().sort((a, b) => a - b);
   state.right = (chart.right || []).slice().sort((a, b) => a - b);
-  state.audioAnalysis = chart.audio_analysis || null;
+  updateAnalysisDerivedState(chart.audio_analysis || null);
   const leftMax = state.left.length ? Math.max(...state.left) : 0;
   const rightMax = state.right.length ? Math.max(...state.right) : 0;
-  state.chartDurationMs = Math.max(leftMax, rightMax) + 1200;
-  const descriptors = state.audioAnalysis?.beat_descriptors;
-  if (Array.isArray(descriptors) && descriptors.length > 0) {
-    state.spectralRmsMax = Math.max(
-      ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
-      MIN_SPECTRAL_RMS
-    );
-  } else {
-    state.spectralRmsMax = 1;
-  }
+  state.chartDurationMs = Math.max(leftMax, rightMax) + CHART_TRAVEL_TIME_MS;
   state.beats = [];
   state.beatIntervalMs = 500;
   state.subdivisions = [];
@@ -578,25 +669,23 @@ async function loadSong(songId) {
   };
   renderBeatGrid();
   
-  document.getElementById('song-bpm').value = state.bpm;
-  document.getElementById('global-offset').value = state.offset;
+  getElement('song-bpm').value = state.bpm;
+  getElement('global-offset').value = state.offset;
   setChartDirtyBaseline();
   
-  document.getElementById('editor-title').textContent = 'Editing';
-  const editor = document.getElementById('song-editor');
-  editor.classList.remove('hidden');
-  editor.setAttribute('aria-hidden', 'false');
+  getElement('editor-title').textContent = `Editing ${songId}`;
+  setSectionHidden('song-editor', false);
   
   if (wavesurfer) wavesurfer.destroy();
   
   wavesurfer = WaveSurfer.create({
     container: '#waveform',
-    waveColor: '#4f46e5',
-    progressColor: '#3b82f6',
-    cursorColor: '#f43f5e',
-    barWidth: 2,
-    barRadius: 3,
-    height: 128,
+    waveColor: WAVE_SURFER_COLORS.wave || '#4f46e5',
+    progressColor: WAVE_SURFER_COLORS.progress || '#3b82f6',
+    cursorColor: WAVE_SURFER_COLORS.cursor || '#f43f5e',
+    barWidth: WAVE_SURFER_THEME.barWidth || 2,
+    barRadius: WAVE_SURFER_THEME.barRadius || 3,
+    height: WAVE_SURFER_THEME.height?.manage || 128,
     url: `${apiBaseUrl}/songs/${encodeURIComponent(songId)}/audio`
   });
   requestAnimationFrame(() => {
@@ -690,7 +779,9 @@ function updateBeatGrid() {
     wsRegions.addRegion({
       start: beat.time,
       end: beat.time + 0.01,
-      color: beat.isBar ? '#f6d03f' : 'rgba(255, 255, 255, 0.4)',
+      color: beat.isBar
+        ? (REGION_COLORS.bar || '#f6d03f')
+        : (REGION_COLORS.beat || 'rgba(255, 255, 255, 0.4)'),
       drag: false,
       resize: false,
       content: beat.isBar ? 'BAR' : ''
@@ -769,169 +860,135 @@ async function saveChart() {
   if (!state.hasUnsavedChartChanges) return;
   const payload = buildCurrentChartPayload();
   
-  const status = document.getElementById('save-status');
-  status.textContent = 'Saving...';
+  setStatusMessage('save-status', 'Saving...');
   setControlEnabled('btn-save-chart', false);
   
   try {
-    const res = await fetch(`${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}`, {
+    await requestJson(`${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      status.textContent = 'Saved successfully!';
-      setChartDirtyBaseline();
-      setTimeout(() => { status.textContent = ''; }, 3000);
-    } else {
-      throw new Error('Save failed');
-    }
+    }, 'Save failed');
+    setStatusMessage('save-status', 'Saved successfully!', { clearAfterMs: 3000 });
+    setChartDirtyBaseline();
   } catch (e) {
-    status.textContent = 'Error: ' + e.message;
+    setStatusMessage('save-status', `Error: ${e.message}`);
   } finally {
     updateControlStates();
   }
 }
 
 async function analyzeAudioMetadata() {
-  const status = document.getElementById('save-status');
   if (!currentSongId) {
-    status.textContent = 'Select a song before analyzing';
+    setStatusMessage('save-status', 'Select a song before analyzing');
     return;
   }
 
-  status.textContent = 'Analyzing audio features...';
+  setStatusMessage('save-status', 'Analyzing audio features...');
   setControlEnabled('btn-analyze-audio', false);
 
   try {
-    const response = await fetch(
+    const payload = await requestJson(
       `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/analysis`,
-      { method: 'POST' }
+      { method: 'POST' },
+      'Audio analysis failed'
     );
-    if (!response.ok) {
-      const detail = (await response.text()) || response.statusText;
-      throw new Error(detail || 'Audio analysis failed');
-    }
-
-    const payload = await response.json();
-    state.audioAnalysis = payload.analysis || null;
+    updateAnalysisDerivedState(payload.analysis || null);
     ensureManageWaveformController()?.invalidateOverviewCache();
     const analyzedOffset = Number(payload?.global_offset_ms);
     if (Number.isFinite(analyzedOffset)) {
       state.offset = Math.round(analyzedOffset);
-      document.getElementById('global-offset').value = String(state.offset);
-    }
-    const descriptors = state.audioAnalysis?.beat_descriptors;
-    if (Array.isArray(descriptors) && descriptors.length > 0) {
-      state.spectralRmsMax = Math.max(
-        ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
-        MIN_SPECTRAL_RMS
-      );
-    } else {
-      state.spectralRmsMax = 1;
+      getElement('global-offset').value = String(state.offset);
     }
     let didUpdateBeatGrid = false;
     const bpm = parseFloat(payload?.bpm);
     if (Number.isFinite(bpm) && bpm > 0) {
       state.bpm = bpm;
-      document.getElementById('song-bpm').value = String(bpm);
+      getElement('song-bpm').value = String(bpm);
       updateBeatGrid();
       didUpdateBeatGrid = true;
     }
     if (!didUpdateBeatGrid && Number.isFinite(analyzedOffset)) {
       updateBeatGrid();
     }
-    status.textContent = 'Tempo and spectral analysis saved';
+    setStatusMessage('save-status', 'Tempo and spectral analysis saved', { clearAfterMs: 3000 });
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
     refreshChartDirtyState();
-    setTimeout(() => {
-      status.textContent = '';
-    }, 3000);
   } catch (e) {
     console.error(e);
-    status.textContent = e instanceof Error ? e.message : 'Audio analysis failed';
+    setStatusMessage(
+      'save-status',
+      e instanceof Error ? e.message : 'Audio analysis failed'
+    );
   } finally {
     updateControlStates();
   }
 }
 
 async function autoGeneratePattern() {
-  const status = document.getElementById('save-status');
   if (!currentSongId) {
-    status.textContent = 'Select a song before generating a pattern';
+    setStatusMessage('save-status', 'Select a song before generating a pattern');
     return;
   }
 
-  status.textContent = 'Generating jump pattern...';
+  setStatusMessage('save-status', 'Generating jump pattern...');
   setControlEnabled('btn-auto-pattern', false);
 
   try {
-    const response = await fetch(
+    const payload = await requestJson(
       `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/auto-pattern`,
-      { method: 'POST' }
+      { method: 'POST' },
+      'Pattern generation failed'
     );
-    if (!response.ok) {
-      const detail = (await response.text()) || response.statusText;
-      throw new Error(detail || 'Pattern generation failed');
-    }
-
-    const payload = await response.json();
     state.left = (payload.left || []).slice().sort((a, b) => a - b);
     state.right = (payload.right || []).slice().sort((a, b) => a - b);
-    state.audioAnalysis = payload.analysis || state.audioAnalysis;
+    updateAnalysisDerivedState(payload.analysis || state.audioAnalysis);
     ensureManageWaveformController()?.invalidateOverviewCache();
 
     const generatedOffset = Number(payload.global_offset_ms);
     if (Number.isFinite(generatedOffset)) {
       state.offset = Math.round(generatedOffset);
-      document.getElementById('global-offset').value = String(state.offset);
+      getElement('global-offset').value = String(state.offset);
     }
     const generatedBpm = Number(payload.bpm);
     if (Number.isFinite(generatedBpm) && generatedBpm > 0) {
       state.bpm = generatedBpm;
-      document.getElementById('song-bpm').value = String(generatedBpm);
-    }
-    const descriptors = state.audioAnalysis?.beat_descriptors;
-    if (Array.isArray(descriptors) && descriptors.length > 0) {
-      state.spectralRmsMax = Math.max(
-        ...descriptors.map((descriptor) => Number(descriptor.rms) || 0),
-        MIN_SPECTRAL_RMS
-      );
-    } else {
-      state.spectralRmsMax = 1;
+      getElement('song-bpm').value = String(generatedBpm);
     }
 
     updateBeatGrid();
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
     refreshChartDirtyState();
-    status.textContent = 'Generated beat-balanced jump pattern (not saved)';
-    setTimeout(() => {
-      status.textContent = '';
-    }, 3000);
+    setStatusMessage(
+      'save-status',
+      'Generated beat-balanced jump pattern (not saved)',
+      { clearAfterMs: 3000 }
+    );
   } catch (e) {
     console.error(e);
-    status.textContent = e instanceof Error ? e.message : 'Pattern generation failed';
+    setStatusMessage(
+      'save-status',
+      e instanceof Error ? e.message : 'Pattern generation failed'
+    );
   } finally {
     updateControlStates();
   }
 }
 
 function init() {
-  document.getElementById('song-edit-select').addEventListener('change', (e) => {
+  getElement('song-edit-select').addEventListener('change', (e) => {
     if (e.target.value) {
       window.localStorage.setItem(MANAGE_SELECTED_SONG_KEY, e.target.value);
       loadSong(e.target.value);
     } else {
       window.localStorage.removeItem(MANAGE_SELECTED_SONG_KEY);
-      const editor = document.getElementById('song-editor');
-      editor.classList.add('hidden');
-      editor.setAttribute('aria-hidden', 'true');
+      setSectionHidden('song-editor', true);
+      getElement('editor-title').textContent = 'Editing';
       currentSongId = '';
       isWavePlaying = false;
       ensureManageWaveformController()?.stopScrollDrag();
       ensureManageWaveformController()?.stopOverviewDrag();
-      state.audioAnalysis = null;
-      state.spectralRmsMax = 1;
+      updateAnalysisDerivedState(null);
       ensureManageWaveformController()?.invalidateOverviewCache();
       ensureManageWaveformController()?.updateVisibleWindowRatios();
       state.chartBaselineSignature = '';
@@ -945,8 +1002,8 @@ function init() {
     }
   });
   
-  const uploadTab = document.getElementById('tab-upload-song');
-  const downloadTab = document.getElementById('tab-download-song');
+  const uploadTab = getElement('tab-upload-song');
+  const downloadTab = getElement('tab-download-song');
   uploadTab?.addEventListener('click', () => {
     setSongSourceMode('upload');
   });
@@ -955,99 +1012,85 @@ function init() {
   });
   setSongSourceMode('upload');
 
-  document.getElementById('upload-form')?.addEventListener('submit', async (e) => {
+  getElement('upload-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const songId = document.getElementById('new-song-id').value;
-    const audioFile = document.getElementById('new-song-audio').files[0];
-    const status = document.getElementById('upload-status');
+    const songId = getElement('new-song-id').value;
+    const audioFile = getElement('new-song-audio').files[0];
 
-    if (!songId || !audioFile || !status) return;
+    if (!songId || !audioFile) return;
 
-    status.textContent = 'Uploading...';
     const uploadBtn = e.target.querySelector('button[type="submit"]');
-    if (uploadBtn) uploadBtn.disabled = true;
+    setStatusMessage('upload-status', 'Uploading...');
 
     const formData = new FormData();
     formData.append('song_id', songId);
     formData.append('audio', audioFile);
 
-    try {
-      const res = await fetch(`${apiBaseUrl}/songs`, {
+    await runWithDisabled(uploadBtn, async () => {
+      const response = await fetch(`${apiBaseUrl}/songs`, {
         method: 'POST',
         body: formData
       });
-      if (res.ok) {
-        await handleSongImportSuccess(songId, status, 'Upload complete!');
-      } else {
+      if (!response.ok) {
         throw new Error('Upload failed');
       }
-    } catch (e) {
-      status.textContent = 'Error: ' + e.message;
-    } finally {
-      if (uploadBtn) uploadBtn.disabled = false;
-    }
+      await handleSongImportSuccess(songId, getElement('upload-status'), 'Upload complete!');
+    }).catch((e) => {
+      setStatusMessage('upload-status', `Error: ${e.message}`);
+    });
   });
 
-  document.getElementById('download-form')?.addEventListener('submit', async (e) => {
+  getElement('download-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const songId = document.getElementById('download-song-id').value.trim();
-    const sourceUrl = document.getElementById('download-song-url').value.trim();
-    const status = document.getElementById('download-status');
+    const songId = getElement('download-song-id').value.trim();
+    const sourceUrl = getElement('download-song-url').value.trim();
 
-    if (!songId || !sourceUrl || !status) return;
+    if (!songId || !sourceUrl) return;
 
-    status.textContent = 'Downloading...';
     const downloadBtn = e.target.querySelector('button[type="submit"]');
-    if (downloadBtn) downloadBtn.disabled = true;
+    setStatusMessage('download-status', 'Downloading...');
 
-    try {
-      const res = await fetch(`${apiBaseUrl}/songs/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          song_id: songId,
-          source_url: sourceUrl
-        })
-      });
-      if (res.ok) {
-        await handleSongImportSuccess(songId, status, 'Download complete!');
+    await runWithDisabled(downloadBtn, async () => {
+        await requestJson(`${apiBaseUrl}/songs/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            song_id: songId,
+            source_url: sourceUrl
+          })
+        }, 'Download failed');
+        await handleSongImportSuccess(songId, getElement('download-status'), 'Download complete!');
         setSongSourceMode('upload');
-      } else {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.detail || 'Download failed');
-      }
-    } catch (e) {
-      status.textContent = 'Error: ' + e.message;
-    } finally {
-      if (downloadBtn) downloadBtn.disabled = false;
-    }
+      }).catch((e) => {
+      setStatusMessage('download-status', `Error: ${e.message}`);
+    });
   });
   
-  document.getElementById('btn-play-pause').addEventListener('click', () => {
+  getElement('btn-play-pause').addEventListener('click', () => {
     if (wavesurfer) wavesurfer.playPause();
   });
 
-  document.getElementById('btn-stop-playback').addEventListener('click', () => {
+  getElement('btn-stop-playback').addEventListener('click', () => {
     stopManagePlayback();
   });
   
-  document.getElementById('btn-tap-bpm').addEventListener('click', () => {
+  getElement('btn-tap-bpm').addEventListener('click', () => {
     tapBpm();
     updateBeatGrid();
     refreshChartDirtyState();
   });
-  document.getElementById('btn-auto-pattern').addEventListener('click', autoGeneratePattern);
+  getElement('btn-auto-pattern').addEventListener('click', autoGeneratePattern);
   
-  document.getElementById('btn-analyze-audio').addEventListener('click', analyzeAudioMetadata);
+  getElement('btn-analyze-audio').addEventListener('click', analyzeAudioMetadata);
   
-  document.getElementById('song-bpm').addEventListener('input', updateBeatGrid);
-  document.getElementById('song-bpm').addEventListener('input', refreshChartDirtyState);
-  document.getElementById('global-offset').addEventListener('input', updateBeatGrid);
-  document.getElementById('global-offset').addEventListener('input', refreshChartDirtyState);
-  document.getElementById('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
+  getElement('song-bpm').addEventListener('input', updateBeatGrid);
+  getElement('song-bpm').addEventListener('input', refreshChartDirtyState);
+  getElement('global-offset').addEventListener('input', updateBeatGrid);
+  getElement('global-offset').addEventListener('input', refreshChartDirtyState);
+  getElement('zoom-beat-grid').addEventListener('click', handleBeatGridClick);
   ensureManageWaveformController();
   
-  document.getElementById('btn-save-chart').addEventListener('click', saveChart);
+  getElement('btn-save-chart').addEventListener('click', saveChart);
   window.addEventListener('resize', () => {
     renderManageSpectralWaveform((wavesurfer?.getCurrentTime?.() || 0) * 1000);
   });
