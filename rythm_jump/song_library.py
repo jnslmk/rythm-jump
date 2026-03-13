@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from rythm_jump.config import build_path_config
 from rythm_jump.models.chart import Chart, JudgementWindowsMs
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ SONG_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
 def charts_root_dir() -> Path:
     """Return the repository song library path."""
-    return Path(__file__).resolve().parents[1] / "songs"
+    return build_path_config().songs_dir
 
 
 def song_dir(song_id: str, *, root_dir: Path | None = None) -> Path:

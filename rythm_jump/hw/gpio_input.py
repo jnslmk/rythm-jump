@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib
-import os
 from typing import TYPE_CHECKING, Protocol, cast
+
+from rythm_jump.config import build_gpio_config
 
 if TYPE_CHECKING:
     from rythm_jump.engine.types import Lane
@@ -48,15 +49,8 @@ def _load_gpio_module() -> GPIOProtocol | None:
 
 def _lane_pin(lane: Lane) -> int:
     """Return the configured GPIO pin for the given lane."""
-    env_var = (
-        "RHYTHM_LEFT_CONTACT_PIN" if lane == "left" else "RHYTHM_RIGHT_CONTACT_PIN"
-    )
-    fallback = "17" if lane == "left" else "27"
-    raw_value = os.getenv(env_var, fallback)
-    try:
-        return int(raw_value)
-    except ValueError:
-        return int(fallback)
+    config = build_gpio_config()
+    return config.left_contact_pin if lane == "left" else config.right_contact_pin
 
 
 def read_jump_box_states() -> dict[Lane, bool]:

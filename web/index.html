@@ -134,6 +134,83 @@
           </div>
         </dl>
       </section>
+
+      <section
+        id="hardware-debug"
+        class="surface surface-plain"
+        aria-labelledby="hardware-debug-title"
+      >
+        <header class="section-header">
+          <h2 id="hardware-debug-title">Hardware Debug</h2>
+          <p class="hint hardware-debug-meta">
+            Read current jump-box GPIO inputs and run quick WS2811 strip diagnostics from the browser.
+          </p>
+        </header>
+        <div class="hardware-debug-grid">
+          <article class="status-item hardware-debug-card" aria-labelledby="hardware-debug-gpio-title">
+            <div class="hardware-debug-card-header">
+              <h3 id="hardware-debug-gpio-title" class="label">Jump Box Inputs</h3>
+              <p id="debug-gpio-pins" class="hint hardware-debug-meta">Pins: --</p>
+            </div>
+            <dl class="status-grid" aria-label="Current jump box state">
+              <div class="status-item">
+                <dt class="label">Left Lane</dt>
+                <dd id="debug-gpio-left">Unknown</dd>
+              </div>
+              <div class="status-item">
+                <dt class="label">Right Lane</dt>
+                <dd id="debug-gpio-right">Unknown</dd>
+              </div>
+            </dl>
+            <div class="hardware-debug-actions">
+              <button id="btn-refresh-gpio" type="button" class="ghost-button">Refresh Inputs</button>
+              <output id="debug-gpio-status" class="hint" role="status" aria-live="polite"></output>
+            </div>
+          </article>
+
+          <article class="status-item hardware-debug-card" aria-labelledby="hardware-debug-led-title">
+            <div class="hardware-debug-card-header">
+              <h3 id="hardware-debug-led-title" class="label">LED Strip Test</h3>
+              <p class="hint hardware-debug-meta">Runs the same WS2811 output path used on the Raspberry Pi.</p>
+            </div>
+            <div class="hardware-debug-form">
+              <label for="debug-led-pattern">
+                <span class="label">Pattern</span>
+                <select id="debug-led-pattern" class="input-control">
+                  <option value="lanes">Lane Split</option>
+                  <option value="solid">Solid</option>
+                  <option value="chase">Chase</option>
+                </select>
+              </label>
+              <label for="debug-led-color">
+                <span class="label">Color</span>
+                <select id="debug-led-color" class="input-control">
+                  <option value="amber">Amber</option>
+                  <option value="green">Green</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="pink">Pink</option>
+                  <option value="blue">Blue</option>
+                  <option value="red">Red</option>
+                  <option value="white">White</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label for="debug-led-repeat">
+                <span class="label">Repeat</span>
+                <input id="debug-led-repeat" class="input-control" type="number" min="1" max="20" step="1" value="1" />
+              </label>
+              <label for="debug-led-delay">
+                <span class="label">Delay (s)</span>
+                <input id="debug-led-delay" class="input-control" type="number" min="0" max="5" step="0.05" value="0.2" />
+              </label>
+            </div>
+            <div class="hardware-debug-actions">
+              <button id="btn-run-led-debug" type="button" class="ghost-button">Run LED Test</button>
+              <output id="debug-led-status" class="hint" role="status" aria-live="polite"></output>
+            </div>
+          </article>
+        </div>
+      </section>
     </main>
     <audio id="song-audio" preload="auto" hidden></audio>
     <script src="shared-ui.js"></script>

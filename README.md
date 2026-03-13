@@ -1,33 +1,53 @@
 # Rhythm Jump
 
-Rhythm Jump is a two-lane rhythm runner with a FastAPI backend and React web setup UI.
+Rhythm Jump is a two-lane rhythm runner with a FastAPI backend and a browser-based setup UI built with vanilla JavaScript and `oat.css`.
 
 ## Browser Setup Mode Quickstart
 
 1. Install dependencies:
 ```bash
-cd backend && uv sync --group dev
-cd ../web && npm install
+uv sync --group dev
+npm install
 ```
-2. Run both services:
+2. Start the app:
 ```bash
-./scripts/dev.sh
+uv run uvicorn rythm_jump.main:app --reload --host 0.0.0.0 --port 8000
 ```
-3. Open `http://localhost:5173` and use Setup + Chart Editor.
+3. Open `http://localhost:8000/` for the game UI or `http://localhost:8000/manage.html` for song management.
 
 ## Headless Mode Quickstart
 
-1. Install backend dependencies:
+1. Install dependencies:
 ```bash
-cd backend && uv sync --group dev
+uv sync --group dev
 ```
-2. Start backend in autonomous mode:
+2. Start the backend in autonomous mode:
 ```bash
-RHYTHM_HEADLESS_MODE=1 uv run --project backend uvicorn rhythm_jump.main:app --host 0.0.0.0 --port 8000
+RHYTHM_HEADLESS_MODE=1 uv run uvicorn rythm_jump.main:app --host 0.0.0.0 --port 8000
 ```
-3. Ensure contact switch input is wired (see `docs/hardware-wiring.md`).
+3. Ensure the jump-box contact inputs and LED strip are wired as expected.
 
-For Raspberry Pi service startup, install `systemd/rhythm-jump.service` and use `scripts/run_pi.sh` as reference.
+For Raspberry Pi service startup, install `systemd/rhythm-jump.service` and use [docs/runbook.md](docs/runbook.md) as the reference.
+
+## Hardware Debugging
+
+The repository includes a small hardware-debug CLI for Raspberry Pi bring-up and bench testing.
+
+Poll the jump-box GPIO inputs and print state transitions:
+
+```bash
+uv run rj-debug gpio --samples 50 --interval 0.1
+```
+
+Drive the WS2811 strip with a lane split, solid color, or chase pattern:
+
+```bash
+uv run rj-debug led --pattern lanes --repeat 2 --delay 0.2
+uv run rj-debug led --pattern solid --color green --repeat 1 --delay 0.2
+uv run rj-debug led --pattern chase --color amber --repeat 1 --delay 0.05
+```
+
+The browser game UI also exposes these diagnostics in a `Hardware Debug` section. Use `Refresh Inputs` to read the current GPIO state and `Run LED Test` to trigger the selected LED pattern without leaving the page.
 
 ## Hardware Setup
 
@@ -93,7 +113,7 @@ For Raspberry Pi service startup, install `systemd/rhythm-jump.service` and use 
 ## Verification
 
 ```bash
-cd backend && uv run --group dev pytest -q
-npm --prefix web test
-npm --prefix web run build
+uv run pytest -q
+npx eslint web/*.js
+npx stylelint "web/*.css"
 ```

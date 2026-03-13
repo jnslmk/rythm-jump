@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import asynccontextmanager, suppress
-from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -14,43 +12,32 @@ from rythm_jump import compat  # ensure old stdlib APIs stay available
 from rythm_jump.api.charts import router as charts_router
 from rythm_jump.api.http import router as api_router
 from rythm_jump.api.session_stream import router as session_stream_router
-from rythm_jump.engine.io import PollingInputSource, run_polling_input_worker
-from rythm_jump.engine.runtime import GameRuntime
-from rythm_jump.hw.audio_playback import PygameAudioPlayer
-from rythm_jump.hw.gpio_input import read_jump_box_states
-from rythm_jump.hw.led_output import Ws2811LedOutput
+from rythm_jump.bootstrap import (
+    attach_runtime_stack,
+    build_runtime_stack,
+    start_runtime_stack,
+    stop_runtime_stack,
+)
+from rythm_jump.config import build_path_config
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 del compat
 
-FRONTEND_DIR = Path(__file__).parent.parent / "web"
+FRONTEND_DIR = build_path_config().frontend_dir
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Keep a single shared runtime alive for the FastAPI app."""
-    runtime = GameRuntime(audio_player=PygameAudioPlayer())
-    runtime.set_led_output("physical", Ws2811LedOutput())
-    app.state.runtime = runtime
-    input_source = PollingInputSource(
-        runtime,
-        name="jump_box",
-        read_states=read_jump_box_states,
-    )
-    app.state.input_source = input_source
-    app.state.polling_task = asyncio.create_task(run_polling_input_worker(input_source))
+    stack = build_runtime_stack()
+    start_runtime_stack(stack)
+    attach_runtime_stack(app, stack)
 
     yield
 
-    task = getattr(app.state, "polling_task", None)
-    if task is not None:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-
-    await runtime.close()
+    await stop_runtime_stack(stack)
     app.state.polling_task = None
     app.state.input_source = None
     app.state.runtime = None

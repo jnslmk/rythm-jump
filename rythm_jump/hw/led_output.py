@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib
-import os
 from typing import TYPE_CHECKING, Protocol, cast
+
+from rythm_jump.config import build_led_config
 
 if TYPE_CHECKING:
     from rythm_jump.engine.led_frames import LedFrame
@@ -68,22 +69,16 @@ class Ws2811LedOutput:
         if strip_class is None or color_factory is None:
             return None
 
-        led_count = int(os.getenv("RHYTHM_LED_COUNT", "70"))
-        led_pin = int(os.getenv("RHYTHM_LED_PIN", "18"))
-        led_freq_hz = int(os.getenv("RHYTHM_LED_FREQ_HZ", "800000"))
-        led_dma = int(os.getenv("RHYTHM_LED_DMA", "10"))
-        led_invert = os.getenv("RHYTHM_LED_INVERT", "false").lower() == "true"
-        led_brightness = int(os.getenv("RHYTHM_LED_BRIGHTNESS", "255"))
-        led_channel = int(os.getenv("RHYTHM_LED_CHANNEL", "0"))
+        config = build_led_config()
 
         strip = strip_class(
-            led_count,
-            led_pin,
-            led_freq_hz,
-            led_dma,
-            led_invert,
-            led_brightness,
-            led_channel,
+            config.count,
+            config.pin,
+            config.freq_hz,
+            config.dma,
+            config.invert,
+            config.brightness,
+            config.channel,
         )
         strip.begin()
         return cast("PixelStripProtocol", strip)

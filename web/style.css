@@ -282,6 +282,49 @@ h2 {
   border-radius: var(--radius-medium);
 }
 
+.hardware-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.hardware-debug-card {
+  gap: var(--space-4);
+  background: var(--surface-soft);
+}
+
+.hardware-debug-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hardware-debug-meta {
+  margin: 0;
+}
+
+.hardware-debug-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.hardware-debug-form label {
+  margin: 0;
+}
+
+.hardware-debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+#debug-gpio-status[data-state='error'],
+#debug-led-status[data-state='error'] {
+  color: var(--judgement-miss);
+}
+
 .controls,
 .bpm-actions,
 .editor-controls {

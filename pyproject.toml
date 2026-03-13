@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 dev = "rythm_jump.cli:dev"
+rj-debug = "rythm_jump.cli:main"
 
 [dependency-groups]
 dev = [

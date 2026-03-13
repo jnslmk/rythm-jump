@@ -13,6 +13,7 @@ const GAME_NOTE_SNAP_MAX_MS = 180;
 const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
 const ACTIVE_BAR_SPAN = 4;
 const ACTIVE_BAR_FLASH_WINDOW_MS = 260;
+const GPIO_DEBUG_REFRESH_INTERVAL_MS = 5000;
 const ACTIVE_BAR_COLORS = theme.colors?.activeBars || {
   left: 'rgba(90, 210, 255, 0.9)',
   right: 'rgba(255, 105, 160, 0.9)',
@@ -120,12 +121,100 @@ function populateSelectOptions(select, values, options = {}) {
   select.replaceChildren(fragment);
 }
 
+function setStatusMessage(id, message, isError = false) {
+  const element = getElement(id);
+  if (!element) {
+    return;
+  }
+  element.textContent = message || '';
+  element.dataset.state = isError ? 'error' : 'default';
+}
+
 function isSessionPlaying() {
   return state.runStatus === 'playing';
 }
 
 function isSessionPaused() {
   return state.runStatus === 'paused';
+}
+
+async function refreshHardwareDebugState() {
+  const button = getElement('btn-refresh-gpio');
+  if (button) {
+    button.disabled = true;
+  }
+  setStatusMessage('debug-gpio-status', 'Reading inputs...');
+  try {
+    const payload = await requestJson(
+      `${apiBaseUrl}/debug/gpio`,
+      {},
+      'Failed to read jump box inputs'
+    );
+    const pins = payload?.pins || {};
+    const states = payload?.states || {};
+    const pinsLabel = `Pins: left ${pins.left ?? '--'}, right ${pins.right ?? '--'}`;
+    const leftLabel = states.left ? 'Pressed' : 'Idle';
+    const rightLabel = states.right ? 'Pressed' : 'Idle';
+    const leftElement = getElement('debug-gpio-left');
+    const rightElement = getElement('debug-gpio-right');
+    const pinsElement = getElement('debug-gpio-pins');
+    if (pinsElement) {
+      pinsElement.textContent = pinsLabel;
+    }
+    if (leftElement) {
+      leftElement.textContent = leftLabel;
+    }
+    if (rightElement) {
+      rightElement.textContent = rightLabel;
+    }
+    setStatusMessage('debug-gpio-status', `Updated ${new Date().toLocaleTimeString()}`);
+  } catch (error) {
+    console.error('Failed to refresh hardware debug state:', error);
+    setStatusMessage('debug-gpio-status', error.message || 'Failed to read inputs', true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+async function runLedDebugPattern() {
+  const button = getElement('btn-run-led-debug');
+  if (button) {
+    button.disabled = true;
+  }
+  setStatusMessage('debug-led-status', 'Running LED test...');
+  try {
+    const pattern = getElement('debug-led-pattern')?.value || 'lanes';
+    const color = getElement('debug-led-color')?.value || 'amber';
+    const repeat = Number(getElement('debug-led-repeat')?.value || 1);
+    const delay_s = Number(getElement('debug-led-delay')?.value || 0.2);
+    const payload = await requestJson(
+      `${apiBaseUrl}/debug/led`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pattern,
+          color,
+          repeat: Number.isFinite(repeat) && repeat > 0 ? Math.min(Math.round(repeat), 20) : 1,
+          delay_s: Number.isFinite(delay_s) && delay_s >= 0 ? Math.min(delay_s, 5) : 0.2,
+        }),
+      },
+      'Failed to run LED diagnostic'
+    );
+    setStatusMessage(
+      'debug-led-status',
+      `Ran ${payload.pattern} pattern in ${payload.color}`
+    );
+  } catch (error) {
+    console.error('Failed to run LED diagnostic:', error);
+    setStatusMessage('debug-led-status', error.message || 'Failed to run LED test', true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
 }
 
 function updateControlStates() {
@@ -1510,6 +1599,20 @@ function init() {
     });
   }
 
+  const refreshGpioButton = getElement('btn-refresh-gpio');
+  if (refreshGpioButton) {
+    refreshGpioButton.addEventListener('click', () => {
+      void refreshHardwareDebugState();
+    });
+  }
+
+  const runLedDebugButton = getElement('btn-run-led-debug');
+  if (runLedDebugButton) {
+    runLedDebugButton.addEventListener('click', () => {
+      void runLedDebugPattern();
+    });
+  }
+
   getElement('song-select').addEventListener('change', async (event) => {
     const songId = event.target.value;
     state.songId = songId;
@@ -1541,6 +1644,10 @@ function init() {
   ensureGameWaveformController();
   applyGameWaveformZoom({ preferExisting: true });
   renderGameBeatGrid();
+  void refreshHardwareDebugState();
+  window.setInterval(() => {
+    void refreshHardwareDebugState();
+  }, GPIO_DEBUG_REFRESH_INTERVAL_MS);
 
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('resize', () => {
