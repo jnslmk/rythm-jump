@@ -43,6 +43,13 @@ export RHYTHM_RIGHT_CONTACT_PIN=27
 export RHYTHM_LED_PIN=18
 ```
 
+Bench debug commands:
+
+```bash
+rj-debug gpio --samples 50 --interval 0.1
+rj-debug led --pattern lanes --repeat 2 --delay 0.2
+```
+
 ## systemd Service Operations (Pi)
 
 Install and enable:
