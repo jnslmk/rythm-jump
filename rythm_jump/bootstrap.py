@@ -7,6 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from rythm_jump.config import build_led_config
 from rythm_jump.engine.io import PollingInputSource, run_polling_input_worker
 from rythm_jump.engine.runtime import GameRuntime
 from rythm_jump.hw.audio_playback import AudioPlayer, PygameAudioPlayer
@@ -31,7 +32,10 @@ def build_runtime_stack(
     audio_player: AudioPlayer | None = None,
 ) -> RuntimeStack:
     """Construct the default runtime, GPIO input source, and LED output wiring."""
-    runtime = GameRuntime(audio_player=audio_player or PygameAudioPlayer())
+    runtime = GameRuntime(
+        strip_len=build_led_config().count,
+        audio_player=audio_player or PygameAudioPlayer(),
+    )
     runtime.set_led_output("physical", Ws2811LedOutput())
     input_source = PollingInputSource(
         runtime,

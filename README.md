@@ -2,6 +2,9 @@
 
 Rhythm Jump is a two-lane rhythm runner with a FastAPI backend and a browser-based setup UI built with vanilla JavaScript and `oat.css`.
 
+Runtime configuration now lives in [`rythm_jump.toml`](rythm_jump.toml). Adjust GPIO pins,
+LED strip settings, and content paths there before starting the service.
+
 ## Browser Setup Mode Quickstart
 
 1. Install dependencies:
@@ -11,7 +14,7 @@ npm install
 ```
 2. Start the app:
 ```bash
-uv run uvicorn rythm_jump.main:app --reload --host 0.0.0.0 --port 8000
+sudo -E env PATH="$PATH" uv run uvicorn rythm_jump.main:app --reload --host 0.0.0.0 --port 8000
 ```
 3. Open `http://localhost:8000/` for the game UI or `http://localhost:8000/manage.html` for song management.
 
@@ -23,7 +26,7 @@ uv sync --group dev
 ```
 2. Start the backend in autonomous mode:
 ```bash
-RHYTHM_HEADLESS_MODE=1 uv run uvicorn rythm_jump.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn rythm_jump.main:app --host 0.0.0.0 --port 8000
 ```
 3. Ensure the jump-box contact inputs and LED strip are wired as expected.
 

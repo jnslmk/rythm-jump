@@ -1,5 +1,6 @@
 import pytest
 
+from rythm_jump.config import GpioConfig
 from rythm_jump.hw import gpio_input
 
 
@@ -38,8 +39,11 @@ def test_read_jump_box_states_uses_active_low_pull_up(
 ) -> None:
     fake = _FakeGpioModule(values={22: _FakeGpioModule.LOW, 23: _FakeGpioModule.HIGH})
     monkeypatch.setattr(gpio_input, "_load_gpio_module", lambda: fake)
-    monkeypatch.setenv("RHYTHM_LEFT_CONTACT_PIN", "22")
-    monkeypatch.setenv("RHYTHM_RIGHT_CONTACT_PIN", "23")
+    monkeypatch.setattr(
+        gpio_input,
+        "build_gpio_config",
+        lambda: GpioConfig(left_contact_pin=22, right_contact_pin=23),
+    )
 
     assert gpio_input.read_jump_box_states() == {"left": True, "right": False}
     assert fake.mode_calls == [_FakeGpioModule.BCM]

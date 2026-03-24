@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 Side = Literal["left", "right"]
 RgbPixel = tuple[int, int, int]
 
-DEFAULT_STRIP_LEN = 70
 _VALID_SIDES = ("left", "right")
 _MIN_STRIP_LEN = 2
 _BAR_SPAN = 4

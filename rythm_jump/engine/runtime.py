@@ -7,12 +7,8 @@ import inspect
 from contextlib import suppress
 from typing import TYPE_CHECKING, Protocol
 
-from rythm_jump.engine.led_frames import (
-    DEFAULT_STRIP_LEN,
-    InputPulse,
-    LedFrame,
-    build_led_frame,
-)
+from rythm_jump.config import build_led_config
+from rythm_jump.engine.led_frames import InputPulse, LedFrame, build_led_frame
 from rythm_jump.engine.session import GameSession, State
 from rythm_jump.hw.audio_playback import AudioPlayer, NoOpAudioPlayer
 
@@ -54,12 +50,12 @@ class GameRuntime:
         self,
         *,
         session: GameSession | None = None,
-        strip_len: int = DEFAULT_STRIP_LEN,
+        strip_len: int | None = None,
         audio_player: AudioPlayer | None = None,
     ) -> None:
         """Initialize the runtime with session state and optional outputs."""
         self.session = session or GameSession()
-        self.strip_len = strip_len
+        self.strip_len = build_led_config().count if strip_len is None else strip_len
         self.progress_ms = 0
         self.song_id = ""
         self.chart: Chart | None = None

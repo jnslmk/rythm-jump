@@ -1,0 +1,16 @@
+[paths]
+songs_dir = "songs"
+frontend_dir = "web"
+
+[gpio]
+left_contact_pin = 17
+right_contact_pin = 27
+
+[led]
+count = 60
+pin = 18
+freq_hz = 800000
+dma = 10
+invert = false
+brightness = 255
+channel = 0
