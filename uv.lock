@@ -841,6 +841,12 @@ wheels = [
 ]
 
 [[package]]
+name = "rpi-ws281x"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/1e/642208a685c5e96d38323f42c75d9b24f95e2d1b8390dd104e04a712f29e/rpi_ws281x-5.0.0.tar.gz", hash = "sha256:00ce6db771436b778d0930245cf8ea2aae11008cc5fd67d57789c5422af3ee55", size = 64519, upload-time = "2023-05-16T12:04:22.463Z" }
+
+[[package]]
 name = "ruff"
 version = "0.15.4"
 source = { registry = "https://pypi.org/simple" }
@@ -874,6 +880,7 @@ dependencies = [
     { name = "librosa" },
     { name = "pygame" },
     { name = "python-multipart" },
+    { name = "rpi-ws281x" },
     { name = "setuptools" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -898,6 +905,7 @@ requires-dist = [
     { name = "librosa", specifier = ">=0.11.0" },
     { name = "pygame", specifier = ">=2.6.1" },
     { name = "python-multipart", specifier = ">=0.0.22" },
+    { name = "rpi-ws281x", specifier = ">=5.0.0" },
     { name = "setuptools", specifier = ">=82.0.0" },
     { name = "uvicorn", specifier = ">=0.41.0" },
     { name = "websockets", specifier = ">=16.0" },
