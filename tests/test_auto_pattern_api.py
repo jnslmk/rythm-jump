@@ -2,65 +2,11 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from rythm_jump.api import charts as charts_module
-from rythm_jump.main import app
 
 TEST_SONG_ID = "auto-pattern-song"
-HTTP_OK = 200
-STRONG_BEAT_TIMES = {0, 1000, 2000, 3000}
-WEAK_BEAT_TIMES = {250, 750, 1250, 1750, 2250, 2750, 3250, 3750}
-
-
-def _analysis_payload() -> dict[str, object]:
-    beat_times_ms = [
-        0,
-        250,
-        500,
-        750,
-        1000,
-        1250,
-        1500,
-        1750,
-        2000,
-        2250,
-        2500,
-        2750,
-        3000,
-        3250,
-        3500,
-        3750,
-    ]
-    descriptors = []
-    for beat_time_ms in beat_times_ms:
-        is_strong = beat_time_ms in STRONG_BEAT_TIMES
-        descriptors.append(
-            {
-                "time_ms": beat_time_ms,
-                "onset_strength": 0.95 if is_strong else 0.18,
-                "spectral_centroid_hz": 520.0 if is_strong else 2100.0,
-                "spectral_bandwidth_hz": 840.0 if is_strong else 2500.0,
-                "spectral_rolloff_hz": 1900.0 if is_strong else 6100.0,
-                "rms": 0.82 if is_strong else 0.2,
-                "band_energy": {
-                    "low": 0.74 if is_strong else 0.18,
-                    "mid": 0.2 if is_strong else 0.28,
-                    "high": 0.06 if is_strong else 0.54,
-                },
-                "dominant_band": "low" if is_strong else "high",
-                "color_hint": "#60a5fa" if is_strong else "#f472b6",
-            },
-        )
-    return {
-        "version": "librosa-v1",
-        "sample_rate_hz": 22050,
-        "hop_length": 512,
-        "frame_length_ms": 23,
-        "tempo_bpm": 120.0,
-        "beat_times_ms": beat_times_ms,
-        "beat_descriptors": descriptors,
-    }
+UNEXPECTED_EIGHTH_NOTES_MS = (600, 1100)
 
 
 def _chart_payload(song_id: str) -> dict[str, object]:
@@ -75,7 +21,7 @@ def _chart_payload(song_id: str) -> dict[str, object]:
     }
 
 
-def test_auto_pattern_generation_prefers_strong_low_band_beats_and_keeps_chart_unsaved(
+def test_auto_pattern_generation_uses_full_beats_without_running_analysis(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -88,26 +34,59 @@ def test_auto_pattern_generation_prefers_strong_low_band_beats_and_keeps_chart_u
     monkeypatch.setattr(charts_module, "_charts_root_dir", lambda: tmp_path)
     monkeypatch.setattr(
         charts_module,
+        "resolve_playback_duration_ms",
+        lambda _chart, _audio_path: 2000,
+    )
+    monkeypatch.setattr(
+        charts_module,
         "_analyze_audio_with_librosa",
-        lambda _: charts_module.AudioAnalysis.model_validate(_analysis_payload()),
+        lambda _audio_path: pytest.fail("auto-pattern should not run audio analysis"),
     )
 
-    with TestClient(app) as client:
-        response = client.post(f"/api/charts/{TEST_SONG_ID}/auto-pattern")
+    payload = charts_module.auto_generate_chart_pattern(TEST_SONG_ID)
 
-    assert response.status_code == HTTP_OK
-    payload = response.json()
     assert payload["ok"] is True
-    assert payload["analysis_generated"] is True
-
-    combined_notes = set(payload["left"]) | set(payload["right"])
-    assert STRONG_BEAT_TIMES.issubset(combined_notes)
-    assert len(combined_notes & STRONG_BEAT_TIMES) >= len(
-        combined_notes & WEAK_BEAT_TIMES,
-    )
-    assert abs(len(payload["left"]) - len(payload["right"])) <= 1
+    assert payload["analysis_generated"] is False
+    assert payload["pattern"] == "beat"
+    assert payload["left"] == [0, 1000, 2000]
+    assert payload["right"] == [500, 1500]
 
     persisted = json.loads(chart_path.read_text(encoding="utf-8"))
     assert persisted["left"] == []
     assert persisted["right"] == []
     assert "audio_analysis" not in persisted
+
+
+def test_auto_pattern_generation_can_target_bar_downbeats_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    song_dir = tmp_path / TEST_SONG_ID
+    song_dir.mkdir(parents=True)
+    chart_path = song_dir / "chart.json"
+    payload = _chart_payload(TEST_SONG_ID)
+    payload["global_offset_ms"] = 100
+    chart_path.write_text(json.dumps(payload), encoding="utf-8")
+    (song_dir / "audio.mp3").write_bytes(b"fake-mp3")
+
+    monkeypatch.setattr(charts_module, "_charts_root_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        charts_module,
+        "resolve_playback_duration_ms",
+        lambda _chart, _audio_path: 4500,
+    )
+
+    generated = charts_module.auto_generate_chart_pattern(
+        TEST_SONG_ID,
+        charts_module.AutoPatternRequest(pattern="bar"),
+    )
+
+    assert generated["ok"] is True
+    assert generated["pattern"] == "bar"
+    assert generated["left"] == [100, 4100]
+    assert generated["right"] == [2100]
+
+    combined_notes = generated["left"] + generated["right"]
+    assert sorted(combined_notes) == [100, 2100, 4100]
+    for unexpected_note_ms in UNEXPECTED_EIGHTH_NOTES_MS:
+        assert unexpected_note_ms not in combined_notes

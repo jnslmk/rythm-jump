@@ -935,9 +935,14 @@ async function autoGeneratePattern() {
   setControlEnabled('btn-auto-pattern', false);
 
   try {
+    const pattern = getElement('auto-pattern-density')?.value || 'beat';
     const payload = await requestJson(
       `${apiBaseUrl}/charts/${encodeURIComponent(currentSongId)}/auto-pattern`,
-      { method: 'POST' },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern })
+      },
       'Pattern generation failed'
     );
     state.left = (payload.left || []).slice().sort((a, b) => a - b);
@@ -961,7 +966,9 @@ async function autoGeneratePattern() {
     refreshChartDirtyState();
     setStatusMessage(
       'save-status',
-      'Generated beat-balanced jump pattern (not saved)',
+      payload.pattern === 'bar'
+        ? 'Generated downbeat-only jump pattern (not saved)'
+        : 'Generated beat-only jump pattern (not saved)',
       { clearAfterMs: 3000 }
     );
   } catch (e) {

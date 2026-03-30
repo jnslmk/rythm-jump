@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -11,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from rythm_jump.audio_analysis import (
     analyze_audio_with_librosa,
     estimate_global_offset_ms,
-    generate_auto_pattern_from_analysis,
+    resolve_playback_duration_ms,
 )
 from rythm_jump.models.chart import AudioAnalysis, Chart  # noqa: TC001
 from rythm_jump.song_library import (
@@ -42,6 +43,12 @@ class SongDownloadRequest(BaseModel):
     source_url: str
 
 
+class AutoPatternRequest(BaseModel):
+    """Describe the requested auto-pattern beat density."""
+
+    pattern: str = "beat"
+
+
 def _charts_root_dir() -> Path:
     return charts_root_dir()
 
@@ -61,6 +68,54 @@ def _analyze_audio_with_librosa(audio_path: Path) -> AudioAnalysis:
 def _validate_song_id(song_id: str) -> None:
     if not SONG_ID_PATTERN.fullmatch(song_id):
         raise HTTPException(status_code=400, detail="invalid_song_id")
+
+
+def _validate_auto_pattern_kind(pattern: str) -> str:
+    normalized = pattern.strip().lower()
+    if normalized in {"bar", "beat"}:
+        return normalized
+    raise HTTPException(status_code=400, detail="invalid_auto_pattern")
+
+
+def _generate_auto_pattern_from_grid(
+    duration_ms: int,
+    bpm: float,
+    global_offset_ms: int,
+    *,
+    pattern: str,
+) -> tuple[list[int], list[int]]:
+    if duration_ms <= 0 or bpm <= 0:
+        return [], []
+
+    beat_interval_ms = 60_000 / bpm
+    if beat_interval_ms <= 0 or not math.isfinite(beat_interval_ms):
+        return [], []
+
+    start_beat_index = math.ceil(-global_offset_ms / beat_interval_ms)
+    generated_times: list[int] = []
+    last_time_ms: int | None = None
+
+    for beat_index in range(start_beat_index, start_beat_index + 60_000):
+        time_ms = round(global_offset_ms + (beat_index * beat_interval_ms))
+        if time_ms > duration_ms:
+            break
+        if time_ms < 0:
+            continue
+        if pattern == "bar" and ((beat_index % 4) + 4) % 4 != 0:
+            continue
+        if last_time_ms == time_ms:
+            continue
+        generated_times.append(time_ms)
+        last_time_ms = time_ms
+
+    left: list[int] = []
+    right: list[int] = []
+    for index, time_ms in enumerate(generated_times):
+        if index % 2 == 0:
+            left.append(time_ms)
+        else:
+            right.append(time_ms)
+    return left, right
 
 
 @router.get("/songs")
@@ -214,8 +269,11 @@ def analyze_chart_audio(song_id: str) -> dict[str, object]:
 
 
 @router.post("/charts/{song_id}/auto-pattern")
-def auto_generate_chart_pattern(song_id: str) -> dict[str, object]:
-    """Generate a beat-balanced jump pattern from audio analysis."""
+def auto_generate_chart_pattern(
+    song_id: str,
+    request: AutoPatternRequest | None = None,
+) -> dict[str, object]:
+    """Generate a BPM/grid-based jump pattern without running analysis."""
     _validate_song_id(song_id)
     current_chart_path = chart_path(song_id, root_dir=_charts_root_dir())
     if not current_chart_path.exists():
@@ -230,41 +288,28 @@ def auto_generate_chart_pattern(song_id: str) -> dict[str, object]:
     except (OSError, ValidationError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="failed_to_load_chart") from exc
 
-    generated_chart = current_chart.model_copy(deep=True)
-    analysis_generated = False
-    if generated_chart.audio_analysis is None:
-        try:
-            generated_chart.audio_analysis = _analyze_audio_with_librosa(audio_path)
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail="analysis_backend_unavailable",
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail="audio_analysis_failed",
-            ) from exc
-        generated_chart.bpm = generated_chart.audio_analysis.tempo_bpm
-        generated_chart.global_offset_ms = estimate_global_offset_ms(
-            generated_chart.audio_analysis.beat_times_ms,
-            generated_chart.audio_analysis.tempo_bpm,
-        )
-        analysis_generated = True
-
-    if generated_chart.audio_analysis is None:
-        raise HTTPException(status_code=500, detail="audio_analysis_missing")
-
-    generated_chart.left, generated_chart.right = generate_auto_pattern_from_analysis(
-        generated_chart.audio_analysis,
+    pattern_kind = _validate_auto_pattern_kind(
+        (request or AutoPatternRequest()).pattern,
+    )
+    duration_ms = resolve_playback_duration_ms(current_chart, audio_path)
+    left, right = _generate_auto_pattern_from_grid(
+        duration_ms,
+        current_chart.bpm,
+        current_chart.global_offset_ms,
+        pattern=pattern_kind,
     )
     return {
         "ok": True,
         "song_id": song_id,
-        "analysis_generated": analysis_generated,
-        "bpm": generated_chart.bpm,
-        "global_offset_ms": generated_chart.global_offset_ms,
-        "left": generated_chart.left,
-        "right": generated_chart.right,
-        "analysis": generated_chart.audio_analysis.model_dump(mode="json"),
+        "analysis_generated": False,
+        "pattern": pattern_kind,
+        "bpm": current_chart.bpm,
+        "global_offset_ms": current_chart.global_offset_ms,
+        "left": left,
+        "right": right,
+        "analysis": (
+            current_chart.audio_analysis.model_dump(mode="json")
+            if current_chart.audio_analysis is not None
+            else None
+        ),
     }

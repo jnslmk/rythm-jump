@@ -136,22 +136,29 @@ def test_post_auto_pattern_returns_generated_notes_without_persisting(
     song_dir.mkdir(parents=True)
     chart_path = song_dir / "chart.json"
     payload = _chart_payload(TEST_SONG_ID)
-    payload["audio_analysis"] = _analysis_payload()
     chart_path.write_text(json.dumps(payload), encoding="utf-8")
     (song_dir / "audio.mp3").write_bytes(b"fake-mp3")
 
     monkeypatch.setattr(charts_module, "_charts_root_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        charts_module,
+        "resolve_playback_duration_ms",
+        lambda _chart, _audio_path: 2000,
+    )
+    monkeypatch.setattr(
+        charts_module,
+        "_analyze_audio_with_librosa",
+        lambda _audio_path: pytest.fail("auto-pattern should not run analysis"),
+    )
 
-    with TestClient(app) as client:
-        response = client.post(f"/api/charts/{TEST_SONG_ID}/auto-pattern")
+    generated = charts_module.auto_generate_chart_pattern(TEST_SONG_ID)
 
-    assert response.status_code == HTTP_OK
-    generated = response.json()
     assert generated["ok"] is True
     assert generated["song_id"] == TEST_SONG_ID
     assert generated["analysis_generated"] is False
-    assert len(generated["left"]) > 0
-    assert len(generated["right"]) > 0
+    assert generated["pattern"] == "beat"
+    assert generated["left"] == [0, 1000, 2000]
+    assert generated["right"] == [500, 1500]
     assert abs(len(generated["left"]) - len(generated["right"])) <= 1
 
     persisted = json.loads(chart_path.read_text(encoding="utf-8"))
