@@ -45,6 +45,17 @@
               <option value="">Loading songs...</option>
             </select>
           </label>
+          <label class="game-bpm-field" for="game-song-bpm">
+            <span class="label">BPM</span>
+            <input
+              id="game-song-bpm"
+              class="input-control"
+              type="number"
+              min="0.1"
+              step="0.1"
+              value="120"
+            />
+          </label>
           <ul class="buttons controls-menu" aria-label="Session controls" role="list">
             <li><button id="btn-start" type="button" class="accent-button">Start Game</button></li>
             <li><button id="btn-stop" type="button" class="ghost-button">Stop</button></li>

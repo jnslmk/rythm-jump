@@ -374,6 +374,10 @@ h2 {
   flex: 1 1 280px;
 }
 
+.game-bpm-field {
+  flex: 0 0 150px;
+}
+
 .controls-menu,
 .editor-controls,
 .bpm-actions {

@@ -11,9 +11,11 @@ const GAME_WAVEFORM_ZOOM_MIN = 1;
 const GAME_WAVEFORM_TARGET_WINDOW_MS = 12000;
 const GAME_NOTE_SNAP_MAX_MS = 180;
 const GAME_BEAT_GRID_OVERSCAN_SLOTS = 96;
+const GAME_BEAT_SUBDIVISIONS_PER_BEAT = 2;
 const ACTIVE_BAR_SPAN = 4;
 const ACTIVE_BAR_FLASH_WINDOW_MS = 260;
 const GPIO_DEBUG_REFRESH_INTERVAL_MS = 5000;
+const DEFAULT_GAME_BPM = 120;
 const ACTIVE_BAR_COLORS = theme.colors?.activeBars || {
   left: 'rgba(90, 210, 255, 0.9)',
   right: 'rgba(255, 105, 160, 0.9)',
@@ -58,6 +60,7 @@ let state = {
   chart: null,
   chartDurationMs: 0,
   spectralRmsMax: 1,
+  gameBpm: DEFAULT_GAME_BPM,
   sessionStartMs: null,
   waveformZoom: loadStoredGameWaveformZoom(),
   visibleWaveformWindowRatios: { start: 0, end: 1 },
@@ -460,41 +463,72 @@ function applyGameWaveformZoom(options = {}) {
   scheduleGameSpectralWaveformRender();
 }
 
-function getSortedBeatTimesMs() {
-  const beatTimes = state.chart?.audio_analysis?.beat_times_ms;
-  if (!Array.isArray(beatTimes) || beatTimes.length === 0) {
+function normalizeGameBpm(value, fallback = DEFAULT_GAME_BPM) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+  return fallback;
+}
+
+function getConfiguredGameBpm() {
+  return normalizeGameBpm(
+    getElement('game-song-bpm')?.value,
+    normalizeGameBpm(state.gameBpm, DEFAULT_GAME_BPM)
+  );
+}
+
+function buildConfiguredBeatSlots(durationMs) {
+  const bpm = getConfiguredGameBpm();
+  if (!Number.isFinite(durationMs) || durationMs <= 0 || bpm <= 0) {
     return [];
   }
-  const sanitized = beatTimes
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value >= 0)
-    .sort((a, b) => a - b);
-  const unique = [];
-  for (let i = 0; i < sanitized.length; i += 1) {
-    if (i === 0 || Math.abs(sanitized[i] - sanitized[i - 1]) > 1) {
-      unique.push(sanitized[i]);
-    }
+
+  const subdivisionIntervalMs = 60_000 / bpm / GAME_BEAT_SUBDIVISIONS_PER_BEAT;
+  if (!Number.isFinite(subdivisionIntervalMs) || subdivisionIntervalMs <= 0) {
+    return [];
   }
-  return unique;
+
+  const offsetMs = Number(state.chart?.global_offset_ms) || 0;
+  const startSubdivisionIndex = Math.ceil(-offsetMs / subdivisionIntervalMs);
+  const slots = [];
+  let safety = 0;
+
+  for (let index = startSubdivisionIndex; ; index += 1) {
+    safety += 1;
+    if (safety > 60000) {
+      break;
+    }
+    const timeMs = offsetMs + (index * subdivisionIntervalMs);
+    if (timeMs > durationMs) {
+      break;
+    }
+    if (timeMs < 0) {
+      continue;
+    }
+
+    const subdivisionInBeat = (
+      (index % GAME_BEAT_SUBDIVISIONS_PER_BEAT) + GAME_BEAT_SUBDIVISIONS_PER_BEAT
+    ) % GAME_BEAT_SUBDIVISIONS_PER_BEAT;
+    slots.push({
+      timeMs,
+      isBeatStart: subdivisionInBeat === 0,
+      beatIndex: Math.floor(index / GAME_BEAT_SUBDIVISIONS_PER_BEAT),
+    });
+  }
+
+  return slots;
 }
 
 function buildGameBeatSlots() {
-  const beatTimes = getSortedBeatTimesMs();
-  if (beatTimes.length === 0) {
+  const durationMs = Math.max(computeTrackDuration(state.chart), 1);
+  const slots = buildConfiguredBeatSlots(durationMs);
+  if (slots.length === 0) {
     state.gameBeatSlots = [];
+    state.gameBeatSlotTimesMs = [];
+    state.gameBeatSlotBaseGapMs = 1;
     state.gameNoteSlotSets = { left: new Set(), right: new Set() };
     return;
-  }
-
-  const slots = [];
-  for (let i = 0; i < beatTimes.length; i += 1) {
-    const timeMs = beatTimes[i];
-    slots.push({ timeMs, isBeatStart: true, beatIndex: i });
-    if (i < beatTimes.length - 1) {
-      const nextMs = beatTimes[i + 1];
-      const midMs = timeMs + ((nextMs - timeMs) * 0.5);
-      slots.push({ timeMs: midMs, isBeatStart: false, beatIndex: i });
-    }
   }
   slots.sort((a, b) => a.timeMs - b.timeMs);
   const slotTimes = slots.map((slot) => slot.timeMs);
@@ -1464,6 +1498,11 @@ async function loadChart(songId) {
       'Failed to load chart'
     );
     state.chart = chartData;
+    state.gameBpm = normalizeGameBpm(chartData?.bpm, DEFAULT_GAME_BPM);
+    const bpmInput = getElement('game-song-bpm');
+    if (bpmInput) {
+      bpmInput.value = String(state.gameBpm);
+    }
     state.noteHitResults = createLaneNoteResults();
     invalidateLedBeatFeedbackCache();
     ensureGameWaveformController()?.invalidateOverviewCache();
@@ -1618,6 +1657,17 @@ function init() {
     state.songId = songId;
     await loadChart(songId);
   });
+
+  const bpmInput = getElement('game-song-bpm');
+  if (bpmInput) {
+    bpmInput.addEventListener('input', () => {
+      state.gameBpm = getConfiguredGameBpm();
+      buildGameBeatSlots();
+      renderGameBeatGrid();
+      scheduleGameUiRender(resolveCurrentPlaybackMs());
+      scheduleGameSpectralWaveformRender(resolveCurrentPlaybackMs());
+    });
+  }
 
   const audio = ensureAudioElement();
   ['loadedmetadata', 'durationchange'].forEach((eventName) => {
