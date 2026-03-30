@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 from rythm_jump.config import build_led_config
@@ -59,6 +60,9 @@ class Ws2811LedOutput:
         self._strip = self._build_strip()
 
     def _build_strip(self) -> PixelStripProtocol | None:
+        if not _supports_physical_ws2811():
+            return None
+
         try:
             module = importlib.import_module("rpi_ws281x")
         except ImportError:
@@ -71,16 +75,19 @@ class Ws2811LedOutput:
 
         config = build_led_config()
 
-        strip = strip_class(
-            config.count,
-            config.pin,
-            config.freq_hz,
-            config.dma,
-            config.invert,
-            config.brightness,
-            config.channel,
-        )
-        strip.begin()
+        try:
+            strip = strip_class(
+                config.count,
+                config.pin,
+                config.freq_hz,
+                config.dma,
+                config.invert,
+                config.brightness,
+                config.channel,
+            )
+            strip.begin()
+        except RuntimeError:
+            return None
         return cast("PixelStripProtocol", strip)
 
     def write_frame(self, frame: LedFrame) -> None:
@@ -92,3 +99,19 @@ class Ws2811LedOutput:
         for index, (red, green, blue) in enumerate(frame.pixels):
             self._strip.setPixelColor(index, color_factory(red, green, blue))
         self._strip.show()
+
+
+def _supports_physical_ws2811() -> bool:
+    """Return whether the host appears to be a Raspberry Pi."""
+    model_path = Path("/proc/device-tree/model")
+    if model_path.exists():
+        model = model_path.read_text(encoding="utf-8", errors="ignore").lower()
+        if "raspberry pi" in model:
+            return True
+
+    cpuinfo_path = Path("/proc/cpuinfo")
+    if not cpuinfo_path.exists():
+        return False
+
+    cpuinfo = cpuinfo_path.read_text(encoding="utf-8", errors="ignore").lower()
+    return "raspberry pi" in cpuinfo or "bcm" in cpuinfo
